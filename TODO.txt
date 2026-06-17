@@ -1,0 +1,193 @@
+==============================================================
+  TODO — MVP LOTERIE SOLANA
+  POINT DE DÉPART : reprise du repo MarginCallTM/Solana_Loto_Rust
+    -> backend Rust/Axum + Postgres DÉJÀ EXISTANT (à reprendre)
+    -> programme on-chain Anchor : À CONSTRUIRE (n'existe pas encore)
+  Ordre : Prise en main -> Programme + tests -> Réconcilier backend -> Frontend
+  Règle d'or : on ne passe au frontend que quand `anchor test` est VERT.
+  Réseau : devnet uniquement.
+==============================================================
+
+
+--------------------------------------------------------------
+PHASE A — PRISE EN MAIN DE L'EXISTANT (reprise de repo)
+--------------------------------------------------------------
+[ ] A.1  Cloner le repo, lire l'arborescence, faire tourner `cargo build`
+[ ] A.2  Cartographier l'archi : models / db/repositories / api/handlers / dto
+[ ] A.3  Lire le schéma SQL (migrations) et le comprendre table par table
+[ ] A.4  Lister ce qui marche vs. ce qui est vide (handlers d'API incomplets)
+[ ] A.5  Noter les scories à corriger (ex: "UPDATE Lotteries" casse, typos commentaires)
+[ ] A.6  Identifier l'écart d'archi : DB écrite en direct vs. modèle indexer/events (D9bis)
+[ ] A.7  Décider quoi garder / refactorer / supprimer ; documenter la décision
+
+
+--------------------------------------------------------------
+PHASE 0 — ENVIRONNEMENT & OUTILLAGE
+--------------------------------------------------------------
+[ ] 0.1  Installer Rust (rustup) + cible/toolchain à jour
+[ ] 0.2  Installer la Solana CLI ; vérifier `solana --version`
+[ ] 0.3  Installer Anchor (via avm) ; vérifier `anchor --version`
+[ ] 0.4  Installer Node.js + un gestionnaire de paquets (pnpm/yarn/npm)
+[ ] 0.5  Configurer la CLI sur devnet (`solana config set --url devnet`)
+[ ] 0.6  Générer un wallet de dev ; l'airdrop en SOL devnet
+[ ] 0.7  Vérifier le .gitignore existant (target/, node_modules/, .env, keypairs)
+[ ] 0.8  Placer CLAUDE.md, TODO.txt, DECISIONS.md à la racine du repo
+[ ] 0.9  Remplir la section "versions réelles" de DECISIONS.md (§9)
+
+
+--------------------------------------------------------------
+PHASE 1 — INTÉGRER ANCHOR AU WORKSPACE EXISTANT
+--------------------------------------------------------------
+[ ] 1.1  Ajouter un dossier `programs/lottery/` à côté du `backend/` existant
+[ ] 1.2  Décider : workspace Cargo unique (backend + programme) vs. Anchor séparé
+[ ] 1.3  Comprendre Anchor.toml (programmes, réseau, wallet, scripts)
+[ ] 1.4  Comprendre le Cargo.toml du programme (anchor-lang) sans casser le workspace existant
+[ ] 1.5  Vérifier que `anchor build` ET `cargo build` (backend) passent côte à côte
+[ ] 1.6  Vérifier que le test Anchor de base passe (`anchor test`)
+[ ] 1.7  Arborescence cible : programs/ tests/ backend/(existant) app/ + migrations existantes
+
+
+--------------------------------------------------------------
+PHASE 2 — MODÈLE DE DONNÉES ON-CHAIN (structs, pas de logique)
+--------------------------------------------------------------
+[ ] 2.1  Définir le compte `Lottery` (round_id, authority, ticket_price,
+         total_tickets, state, winner, pot_amount, end_timestamp, bumps)
+[ ] 2.2  Définir l'enum `LotteryState` (Open / Drawing / Closed)
+[ ] 2.3  Définir le compte `Ticket` (round_id, buyer, index, bump)
+[ ] 2.4  Définir le PDA `Vault` (porte-monnaie, seeds ["vault", round_id])
+[ ] 2.5  Calculer la taille (space) de chaque compte ; documenter le calcul
+[ ] 2.6  Définir les seeds/bumps de chaque PDA et les documenter
+[ ] 2.7  Définir les erreurs custom (#[error_code]) prévisibles
+[ ] 2.8  `anchor build` OK avec les structs (toujours sans logique)
+
+
+--------------------------------------------------------------
+PHASE 3 — INSTRUCTION : initialize_lottery
+--------------------------------------------------------------
+[ ] 3.1  Définir le contexte de comptes (Accounts) + contraintes (init, seeds, payer)
+[ ] 3.2  Implémenter : set authority, ticket_price, end_timestamp (now + durée)
+[ ] 3.3  Initialiser state=Open, total_tickets=0, pot_amount=0
+[ ] 3.4  Initialiser le Vault PDA
+[ ] 3.5  Émettre un event LotteryInitialized (optionnel mais utile)
+[ ] 3.6  Tests : création OK ; durée invalide rejetée ; double init rejeté
+
+
+--------------------------------------------------------------
+PHASE 4 — INSTRUCTION : buy_ticket
+--------------------------------------------------------------
+[ ] 4.1  Contexte de comptes (Lottery, Vault, Ticket à créer, buyer signer)
+[ ] 4.2  Garde temporelle : refuser si now >= end_timestamp
+[ ] 4.3  Garde d'état : refuser si state != Open
+[ ] 4.4  Transférer ticket_price (SOL) du buyer vers le Vault (CPI System Program)
+[ ] 4.5  Créer le Ticket PDA avec index = total_tickets courant
+[ ] 4.6  Incrémenter total_tickets et pot_amount (checked arithmetic)
+[ ] 4.7  Émettre l'event TicketBought (round_id, buyer, index)
+[ ] 4.8  Tests : achat OK ; achat après échéance rejeté ; fonds insuffisants ;
+         état du Vault et compteurs cohérents après N achats
+
+
+--------------------------------------------------------------
+PHASE 5 — INSTRUCTION : draw_winner  (aléatoire isolé)
+--------------------------------------------------------------
+[ ] 5.1  Contexte : Lottery + authority (Signer, has_one = authority)
+[ ] 5.2  Garde temporelle : refuser si now < end_timestamp
+[ ] 5.3  Garde d'état : refuser si state != Open ; passer state=Drawing puis Closed
+[ ] 5.4  Cas limite : 0 ticket vendu -> fermer sans gagnant, ne pas planter
+[ ] 5.5  Fonction d'aléatoire ISOLÉE (slot hash + timestamp + total_tickets)
+         -> renvoie un index dans [0, total_tickets[
+[ ] 5.6  Stocker winner_index ; documenter EN GROS que c'est manipulable
+         (acceptable devnet uniquement, à remplacer par VRF en phase 2)
+[ ] 5.7  Émettre l'event WinnerDrawn (round_id, winner_index)
+[ ] 5.8  Tests : tirage avant échéance rejeté ; non-authority rejeté ;
+         double tirage rejeté ; cas 0 ticket ; index dans les bornes
+
+
+--------------------------------------------------------------
+PHASE 6 — INSTRUCTION : claim_prize
+--------------------------------------------------------------
+[ ] 6.1  Contexte : Lottery, Vault, Ticket gagnant, winner signer
+[ ] 6.2  Vérifier state == Closed
+[ ] 6.3  Vérifier que le Ticket présenté correspond bien au winner_index
+[ ] 6.4  Vérifier que le claimer == buyer du ticket gagnant
+[ ] 6.5  Transférer le pot du Vault vers le gagnant (signer seeds du PDA)
+[ ] 6.6  Marquer le prix comme réclamé (anti double-claim)
+[ ] 6.7  Émettre l'event PrizeClaimed
+[ ] 6.8  Tests : claim OK ; claim par non-gagnant rejeté ; double-claim rejeté ;
+         claim avant tirage rejeté ; solde du gagnant correct après claim
+
+
+--------------------------------------------------------------
+PHASE 7 — DURCISSEMENT & REVUE SÉCURITÉ DU PROGRAMME
+--------------------------------------------------------------
+[ ] 7.1  Revue : toutes les contraintes de comptes (owner, seeds, signer)
+[ ] 7.2  Revue : aucune arithmétique nue sur les lamports (checked_*)
+[ ] 7.3  Revue : aucun unwrap() sauvage ; erreurs custom partout
+[ ] 7.4  Revue : autorités (qui peut appeler quoi) cohérentes
+[ ] 7.5  Vérifier le rent / exemption des comptes créés
+[ ] 7.6  Faire tourner la suite complète de tests (succès + échecs)
+[ ] 7.7  Déployer sur devnet ; vérifier l'IDL généré
+==> JALON : MVP ON-CHAIN COMPLET ET VERT. Frontend autorisé à partir d'ici.
+
+
+--------------------------------------------------------------
+PHASE 8 — BASE DE DONNÉES (REPRISE de l'existant)
+--------------------------------------------------------------
+[ ] 8.1  Réutiliser le schéma existant (users, lotteries, tickets, transactions)
+[ ] 8.2  Vérifier l'alignement des champs avec les events on-chain réels
+         (winning_ticket_number, program_account, transaction_signature...)
+[ ] 8.3  Ajuster le schéma si besoin pour coller au programme Anchor finalisé
+[ ] 8.4  Corriger les scories repérées en phase A (casse SQL, typos)
+[ ] 8.5  Confirmer le rôle : cache reconstructible, jamais de logique critique (D9)
+
+
+--------------------------------------------------------------
+PHASE 9 — RÉCONCILIATION BACKEND -> MODÈLE INDEXER/EVENTS (D9bis)
+--------------------------------------------------------------
+[ ] 9.1  Backend Rust/Axum existant : compléter les handlers d'API vides
+[ ] 9.2  Ajouter un composant indexer qui se connecte au RPC devnet
+[ ] 9.3  S'abonner aux logs/events du programme via l'IDL
+[ ] 9.4  Parser TicketBought / WinnerDrawn / PrizeClaimed
+[ ] 9.5  Remplacer les écritures DB directes par des upserts pilotés par events
+         (idempotents, basés sur transaction_signature)
+[ ] 9.6  Gérer reconnexion RPC + reprise (depuis dernier slot traité)
+[ ] 9.7  Garder l'API REST en LECTURE seule pour le frontend (historique/stats)
+[ ] 9.8  Test : rejouer des events -> état DB cohérent avec on-chain
+
+
+--------------------------------------------------------------
+PHASE 10 — FRONTEND NEXT.JS
+--------------------------------------------------------------
+[ ] 10.1  Init projet Next.js dans app/
+[ ] 10.2  Intégrer @solana/wallet-adapter (connexion Phantom)
+[ ] 10.3  Charger l'IDL + instancier le client Anchor
+[ ] 10.4  Config RPC (env devnet, retries, rate-limit basique)
+[ ] 10.5  Page : afficher round courant (pot, end_timestamp, compteur)
+[ ] 10.6  Action : buy_ticket depuis le wallet connecté
+[ ] 10.7  Action : claim_prize pour le gagnant
+[ ] 10.8  API route Next.js -> lit la DB (historique), pas la chaîne directement
+[ ] 10.9  Page historique des rounds (depuis la DB)
+[ ] 10.10 Gestion des états UI (loading, erreurs tx, wallet non connecté)
+
+
+--------------------------------------------------------------
+PHASE 11 — INTÉGRATION DE BOUT EN BOUT & FINITIONS
+--------------------------------------------------------------
+[ ] 11.1  Scénario complet : init -> achats -> draw -> claim, via l'UI sur devnet
+[ ] 11.2  Vérifier que l'indexer/DB reflète bien tout le cycle
+[ ] 11.3  Mettre en place un cron qui appelle draw_winner à l'échéance
+[ ] 11.4  README : architecture, setup, lancement, captures
+[ ] 11.5  Nettoyage du code + commentaires + cohérence de nommage
+==> JALON : MVP LIVRABLE POUR LE PORTFOLIO.
+
+
+==============================================================
+  PHASE 2 (BACKLOG — NE PAS COMMENCER SANS ACCORD)
+==============================================================
+[ ] Switchboard VRF (aléatoire deux-parties à la Megapot/Pyth)
+[ ] Système de tiers de prix (plusieurs gagnants, plusieurs paliers)
+[ ] Tickets en SPL token
+[ ] Page publique "provably fair" / vérification
+[ ] Dashboard de stats
+[ ] Déclenchement permissionless de draw_winner
+[ ] Déploiement mainnet (uniquement après audit interne sérieux)
+==============================================================
