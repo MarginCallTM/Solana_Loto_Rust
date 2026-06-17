@@ -1,0 +1,7 @@
+# The Anchor program (programs/lottery) is EXCLUDED from the root Cargo workspace
+# (see root Cargo.toml: exclude = ["programs"]). As a standalone crate it would emit its
+# build artifacts into programs/lottery/target/, but `anchor test`/`anchor deploy` expect
+# the program binary at the root target/deploy/lottery.so. We force every cargo invocation
+# from the repo root to share the root target/ directory so the .so lands where Anchor looks.
+[env]
+CARGO_TARGET_DIR = { value = "target", relative = true }

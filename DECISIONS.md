@@ -148,13 +148,30 @@ Anchor en green-field (phases 1-7), puis réconcilier et brancher le frontend.
 
 ---
 
-## 9. À compléter après la phase 0 (versions réelles de la stack)
+## 9. Versions réelles de la stack (relevées le 2026-06-17)
 
-> À remplir avec les sorties réelles — évite que du code soit généré pour des versions supposées.
+- Rust (système) : `rustc 1.95.0` — cargo 1.95.0
+- Rust (SBF / build on-chain) : `rustc 1.84.1` (embarqué dans platform-tools v1.51 de la Solana CLI)
+- Solana CLI : `3.0.13 (Agave)`
+- Anchor : `0.31.1` (CLI via avm + `anchor-lang = "0.31.1"`)
+- Node : `v24.10.0`
+- Gestionnaire de paquets : `yarn 1.22.22` (JS) — Cargo (Rust)
+- Contraintes de norme/structure École 42 éventuelles : aucune connue à ce jour
 
-- Rust : `__________`  (rustc --version)
-- Solana CLI : `__________`  (solana --version)
-- Anchor : `__________`  (anchor --version)
-- Node : `__________`  (node --version)
-- Gestionnaire de paquets : `__________`
-- Contraintes de norme/structure École 42 éventuelles : `__________`
+### D41 — Anchor verrouillé en 0.31.1 (révision de D6) + dépendances épinglées
+
+`anchor build` ne passe PAS avec la stack « tout dernier ». Cause : le compilateur SBF
+de la CLI 3.0.13 est en **rustc 1.84.1**, alors que l'écosystème récent exige rustc ≥ 1.85
+(édition 2024). Bug d'outillage connu (anza-xyz/agave#8443).
+
+Décision : **rester sur Anchor 0.31.1** (descendu depuis 0.32.1) + **épingler** dans
+`programs/lottery/Cargo.lock` les crates transitifs fautifs vers leur dernière version en
+édition 2021 / rustc ≤ 1.84 :
+`proc-macro-crate 3.2.0`, `blake3 1.8.2`, `zeroize 1.8.1`, `indexmap 2.13.1`,
+`unicode-segmentation 1.12.0`.
+
+Conséquences verrouillées :
+- ⚠️ **Ne pas lancer `cargo update`** sur le programme sans réépingler (ça recasse le build).
+- ✅ **Committer `programs/lottery/Cargo.lock`** (reproductibilité du build).
+- 🔁 Réversible : le jour où une CLI Solana embarque un rustc SBF ≥ 1.85, supprimer les pins
+  et remonter Anchor à la dernière version.

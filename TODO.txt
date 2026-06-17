@@ -12,39 +12,49 @@
 --------------------------------------------------------------
 PHASE A — PRISE EN MAIN DE L'EXISTANT (reprise de repo)
 --------------------------------------------------------------
-[ ] A.1  Cloner le repo, lire l'arborescence, faire tourner `cargo build`
-[ ] A.2  Cartographier l'archi : models / db/repositories / api/handlers / dto
-[ ] A.3  Lire le schéma SQL (migrations) et le comprendre table par table
-[ ] A.4  Lister ce qui marche vs. ce qui est vide (handlers d'API incomplets)
-[ ] A.5  Noter les scories à corriger (ex: "UPDATE Lotteries" casse, typos commentaires)
-[ ] A.6  Identifier l'écart d'archi : DB écrite en direct vs. modèle indexer/events (D9bis)
-[ ] A.7  Décider quoi garder / refactorer / supprimer ; documenter la décision
+[x] A.1  Cloner le repo, lire l'arborescence, faire tourner `cargo build`
+[x] A.2  Cartographier l'archi : models / db/repositories / api/handlers / dto
+[x] A.3  Lire le schéma SQL (migrations) et le comprendre table par table
+[x] A.4  Lister ce qui marche vs. ce qui est vide (handlers d'API incomplets)
+[x] A.5  Noter les scories à corriger (ex: "UPDATE Lotteries" casse, typos commentaires)
+         -> repere aussi: api/utils non declares dans main.rs (code mort non compile),
+            handlers/lottery.rs casse (ApiReponse, Uuid::nul(), BadRequest 2 args)
+[x] A.6  Identifier l'écart d'archi : DB écrite en direct vs. modèle indexer/events (D9bis)
+[x] A.7  Décider quoi garder / refactorer / supprimer ; documenter la décision
+         -> garder le backend pour phases 8-10, refactor vers indexer/events plus tard
 
 
 --------------------------------------------------------------
 PHASE 0 — ENVIRONNEMENT & OUTILLAGE
 --------------------------------------------------------------
-[ ] 0.1  Installer Rust (rustup) + cible/toolchain à jour
-[ ] 0.2  Installer la Solana CLI ; vérifier `solana --version`
-[ ] 0.3  Installer Anchor (via avm) ; vérifier `anchor --version`
-[ ] 0.4  Installer Node.js + un gestionnaire de paquets (pnpm/yarn/npm)
+[x] 0.1  Installer Rust (rustup) + cible/toolchain à jour            (1.95 systeme / 1.84.1 SBF)
+[x] 0.2  Installer la Solana CLI ; vérifier `solana --version`       (3.0.13 Agave)
+[x] 0.3  Installer Anchor (via avm) ; vérifier `anchor --version`    (0.31.1 - cf D41)
+[x] 0.4  Installer Node.js + un gestionnaire de paquets (pnpm/yarn/npm)  (node 24.10 + yarn 1.22)
 [ ] 0.5  Configurer la CLI sur devnet (`solana config set --url devnet`)
+         -> NON FAIT: on teste en localnet pour l'instant; devnet au moment du deploiement (7.7)
 [ ] 0.6  Générer un wallet de dev ; l'airdrop en SOL devnet
-[ ] 0.7  Vérifier le .gitignore existant (target/, node_modules/, .env, keypairs)
-[ ] 0.8  Placer CLAUDE.md, TODO.txt, DECISIONS.md à la racine du repo
-[ ] 0.9  Remplir la section "versions réelles" de DECISIONS.md (§9)
+         -> A CONFIRMER: wallet payeur ~/.config/solana/id.json (necessaire pour anchor test)
+[x] 0.7  Vérifier le .gitignore existant (target/, node_modules/, .env, keypairs)
+[x] 0.8  Placer CLAUDE.md, TODO.txt, DECISIONS.md à la racine du repo
+[x] 0.9  Remplir la section "versions réelles" de DECISIONS.md (§9)
 
 
 --------------------------------------------------------------
 PHASE 1 — INTÉGRER ANCHOR AU WORKSPACE EXISTANT
 --------------------------------------------------------------
-[ ] 1.1  Ajouter un dossier `programs/lottery/` à côté du `backend/` existant
-[ ] 1.2  Décider : workspace Cargo unique (backend + programme) vs. Anchor séparé
-[ ] 1.3  Comprendre Anchor.toml (programmes, réseau, wallet, scripts)
-[ ] 1.4  Comprendre le Cargo.toml du programme (anchor-lang) sans casser le workspace existant
-[ ] 1.5  Vérifier que `anchor build` ET `cargo build` (backend) passent côte à côte
-[ ] 1.6  Vérifier que le test Anchor de base passe (`anchor test`)
-[ ] 1.7  Arborescence cible : programs/ tests/ backend/(existant) app/ + migrations existantes
+[x] 1.1  Ajouter un dossier `programs/lottery/` à côté du `backend/` existant
+[x] 1.2  Décider : workspace Cargo unique (backend + programme) vs. Anchor séparé
+         -> CHOIX: Anchor separe; programme EXCLU du workspace racine (exclude = ["programs"])
+[x] 1.3  Comprendre Anchor.toml (programmes, réseau, wallet, scripts)
+[x] 1.4  Comprendre le Cargo.toml du programme (anchor-lang) sans casser le workspace existant
+[x] 1.5  Vérifier que `anchor build` ET `cargo build` (backend) passent côte à côte
+         -> a necessite downgrade Anchor 0.31.1 + pins de deps (cf D41 / agave#8443)
+         -> effet de bord exclusion: le .so sort dans programs/lottery/target/ (pas target/ racine)
+[x] 1.6  Vérifier que le test Anchor de base passe (`anchor test`)  -> VERT (1 passing, ping ok)
+         -> fait: aligne @coral-xyz/anchor@0.31.1 (JS) ; wallet payeur OK ; .so redirige vers
+            target/ racine via .cargo/config.toml ; deplace deploy.ts -> migrations/ (racine)
+[x] 1.7  Arborescence cible : programs/ tests/ backend/(existant) app/ + migrations existantes
 
 
 --------------------------------------------------------------
