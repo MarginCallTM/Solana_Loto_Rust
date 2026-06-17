@@ -23,6 +23,75 @@ pub mod lottery {
         msg!("lottery program: ping ok");
         Ok(())
     }
+
+    pub fn initialize_lottery(
+        ctx: Context<InitializeLottery>,
+        round_id: u64,
+        ticket_price: u64,
+        duration: i64,
+    ) -> Result<()> {
+        // Reject non-positive durations (a round must last some time)
+        require!(duration > 0, LotteryError::InvalidDuration);
+
+        // Read the on-chain clock to compute the round deadline.
+        let now = Clock::get()?.unix_timestamp;
+        let end_timestamp = now
+            .checked_add(duration)
+            .ok_or(LotteryError::MathOverflow)?;
+
+        // Fill the freshly created Lottery account.
+        let lottery = &mut ctx.accounts.lottery;
+        lottery.round_id = round_id;
+        lottery.authority = ctx.accounts.authority.key();
+        lottery.ticket_price = ticket_price;
+        lottery.total_tickets = 0;
+        lottery.pot_amount = 0;
+        lottery.end_timestamp = end_timestamp;
+        lottery.state = LotteryState::Open;
+        lottery.winner_index = None;
+        lottery.claimed = false;
+        lottery.bump = ctx.bumps.lottery;
+        lottery.vault_bump = ctx.bumps.vault;
+
+        emit!(LotteryInitialized {
+            round_id,
+            authority: lottery.authority,
+            ticket_price,
+            end_timestamp,
+        });
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct InitializeLottery<'info> {
+    // The lottery account being created (a PDA)
+    #[account(
+        init,
+        payer = authority,
+        space = Lottery::LEN,
+        seeds = [LOTTERY_SEED, &round_id.to_le_bytes()],
+        bump
+    )]
+    pub lottery: Account<'info, Lottery>,
+
+    // The vault PDA that will hold the SOL pot. Not created here: a lamport-only
+    // PDA is funded lazily on the first ticket payment (System Program creates it
+    // on transfer). We declare it just to derive and store its canonical bump.
+    #[account(
+        seeds = [VAULT_SEED, &round_id.to_le_bytes()],
+        bump
+    )]
+    pub vault: SystemAccount<'info>,
+
+    // The round creator: signs, pays for account creation, becomes authority.
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    // Required by Anchor to create accounts (CPI to the System Program)
+    pub system_program: Program<'info, System>,
+
 }
 
 #[derive(Accounts)]
@@ -85,12 +154,21 @@ pub enum LotteryState {
     Closed,
 }
 
+// Emitted when a new round is created. Consumed off-chain by the indexer.
+#[event]
+pub struct LotteryInitialized {
+    pub round_id: u64,
+    pub authority: Pubkey,
+    pub ticket_price: u64,
+    pub end_timestamp: i64,
+}
+
 // Custum program errors. Anchor numbers them starting at 6000
 #[error_code]
 pub enum LotteryError {
-    #[msg("Duration must be stricly positive.")]
+    #[msg("Duration must be strictly positive.")]
     InvalidDuration,
-    #[msg("Then lottery is not open for ticket sales.")]
+    #[msg("The lottery is not open for ticket sales.")]
     LotteryNotOpen,
     #[msg("Ticket sales have ended for this round.")]
     SalesEnded,
@@ -100,10 +178,10 @@ pub enum LotteryError {
     LotteryNotClosed,
     #[msg("There is no winner to pay out for this round.")]
     NoWinner,
-    #[msg("Signer is not the winner of this round")]
+    #[msg("Signer is not the winner of this round.")]
     NotTheWinner,
-    #[msg("The price has already been claimed")]
+    #[msg("The prize has already been claimed.")]
     AlreadyClaimed,
-    #[msg("Arithmetic overflow")]
-    MathOverFlow,
+    #[msg("Arithmetic overflow.")]
+    MathOverflow,
 }

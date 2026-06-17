@@ -80,6 +80,7 @@ Anchor en green-field (phases 1-7), puis réconcilier et brancher le frontend.
 |---|---|---|
 | D19 | `Lottery` (PDA) — seeds `["lottery", round_id]` — état logique du round | ✅ acté |
 | D20 | `Vault` (PDA) — seeds `["vault", round_id]` — détient les SOL, **séparé de l'état** | ✅ acté |
+| D20bis | Le Vault n'est **pas créé** à l'init : un PDA ne détenant que des lamports est **financé paresseusement** au 1er `buy_ticket` (le System Program le crée au transfert). À l'init on le déclare seulement pour dériver/stocker son bump. Raison: pattern idiomatique + contourne un bug Anchor 0.31.1 (`init` + `SystemAccount` => macro `Accounts` génère du code cassé `try_from`/`try_from_unchecked`) | ✅ acté |
 | D21 | `Ticket` (PDA) — **un compte par achat** (approche scalable, pas de liste inline) | ✅ acté |
 | D22 | `LotteryState` enum = `Open` / `Drawing` / `Closed` | ✅ acté |
 
@@ -90,7 +91,7 @@ Anchor en green-field (phases 1-7), puis réconcilier et brancher le frontend.
 ### Instructions (4 au MVP)
 | # | Instruction | Rôle |
 |---|---|---|
-| D23 | `initialize_lottery(ticket_price, duration)` | authority crée le round, init Lottery + Vault |
+| D23 | `initialize_lottery(round_id, ticket_price, duration)` | authority crée le round, init Lottery + Vault. **round_id fourni en paramètre** (Option A, MVP mono-authority) ; compteur global on-chain = phase 2 si création permissionless |
 | D24 | `buy_ticket()` | transfert SOL -> Vault, crée Ticket PDA, incrémente compteurs |
 | D25 | `draw_winner()` | authority, après échéance : sélectionne l'index gagnant |
 | D26 | `claim_prize()` | le gagnant retire le pot du Vault |

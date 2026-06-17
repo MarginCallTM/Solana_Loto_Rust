@@ -78,12 +78,17 @@ PHASE 2 — MODÈLE DE DONNÉES ON-CHAIN (structs, pas de logique)
 --------------------------------------------------------------
 PHASE 3 — INSTRUCTION : initialize_lottery
 --------------------------------------------------------------
-[ ] 3.1  Définir le contexte de comptes (Accounts) + contraintes (init, seeds, payer)
-[ ] 3.2  Implémenter : set authority, ticket_price, end_timestamp (now + durée)
-[ ] 3.3  Initialiser state=Open, total_tickets=0, pot_amount=0
-[ ] 3.4  Initialiser le Vault PDA
-[ ] 3.5  Émettre un event LotteryInitialized (optionnel mais utile)
-[ ] 3.6  Tests : création OK ; durée invalide rejetée ; double init rejeté
+[x] 3.1  Définir le contexte de comptes (Accounts) + contraintes (init, seeds, payer)
+[x] 3.2  Implémenter : set authority, ticket_price, end_timestamp (now + durée)
+         -> checked_add + ok_or(MathOverflow) ; require!(duration > 0)
+[x] 3.3  Initialiser state=Open, total_tickets=0, pot_amount=0, winner_index=None, claimed=false
+[x] 3.4  Initialiser le Vault PDA
+         -> PAS d'init: financement paresseux au 1er buy_ticket (D20bis, bug Anchor init+SystemAccount)
+            on declare juste le vault pour stocker ctx.bumps.vault
+[x] 3.5  Émettre un event LotteryInitialized (round_id, authority, ticket_price, end_timestamp)
+[x] 3.6  Tests : création OK ; durée invalide rejetée ; double init rejeté  -> 4 passing
+         -> NB: lancer les tests via `make test` (exporte CARGO_TARGET_DIR vers target/ racine)
+            sinon anchor deploie un .so perime (effet de bord exclude workspace)
 
 
 --------------------------------------------------------------
