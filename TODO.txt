@@ -60,15 +60,19 @@ PHASE 1 — INTÉGRER ANCHOR AU WORKSPACE EXISTANT
 --------------------------------------------------------------
 PHASE 2 — MODÈLE DE DONNÉES ON-CHAIN (structs, pas de logique)
 --------------------------------------------------------------
-[ ] 2.1  Définir le compte `Lottery` (round_id, authority, ticket_price,
-         total_tickets, state, winner, pot_amount, end_timestamp, bumps)
-[ ] 2.2  Définir l'enum `LotteryState` (Open / Drawing / Closed)
-[ ] 2.3  Définir le compte `Ticket` (round_id, buyer, index, bump)
-[ ] 2.4  Définir le PDA `Vault` (porte-monnaie, seeds ["vault", round_id])
-[ ] 2.5  Calculer la taille (space) de chaque compte ; documenter le calcul
-[ ] 2.6  Définir les seeds/bumps de chaque PDA et les documenter
-[ ] 2.7  Définir les erreurs custom (#[error_code]) prévisibles
-[ ] 2.8  `anchor build` OK avec les structs (toujours sans logique)
+[x] 2.1  Définir le compte `Lottery` (round_id, authority, ticket_price,
+         total_tickets, state, winner_index, pot_amount, end_timestamp, claimed, bumps)
+[x] 2.2  Définir l'enum `LotteryState` (Open / Drawing / Closed)
+[x] 2.3  Définir le compte `Ticket` (round_id, buyer, index, bump)
+[x] 2.4  Définir le PDA `Vault` (porte-monnaie, seeds ["vault", round_id])
+         -> pas de struct: ne detient que des lamports (D39)
+[x] 2.5  Calculer la taille (space) de chaque compte ; documenter le calcul
+         -> Lottery::LEN = 93 o, Ticket::LEN = 57 o (8 discriminator + champs Borsh)
+[x] 2.6  Définir les seeds/bumps de chaque PDA et les documenter
+         -> constantes LOTTERY_SEED / VAULT_SEED / TICKET_SEED (anti-typo)
+[x] 2.7  Définir les erreurs custom (#[error_code]) prévisibles  -> enum LotteryError (9 variants)
+[x] 2.8  `anchor build` OK avec les structs (toujours sans logique)
+         -> VERT (exit 0); seul warning = realloc deprecated, vient de la macro Anchor (inoffensif)
 
 
 --------------------------------------------------------------
