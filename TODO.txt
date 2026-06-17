@@ -94,31 +94,39 @@ PHASE 3 — INSTRUCTION : initialize_lottery
 --------------------------------------------------------------
 PHASE 4 — INSTRUCTION : buy_ticket
 --------------------------------------------------------------
-[ ] 4.1  Contexte de comptes (Lottery, Vault, Ticket à créer, buyer signer)
-[ ] 4.2  Garde temporelle : refuser si now >= end_timestamp
-[ ] 4.3  Garde d'état : refuser si state != Open
-[ ] 4.4  Transférer ticket_price (SOL) du buyer vers le Vault (CPI System Program)
-[ ] 4.5  Créer le Ticket PDA avec index = total_tickets courant
-[ ] 4.6  Incrémenter total_tickets et pot_amount (checked arithmetic)
-[ ] 4.7  Émettre l'event TicketBought (round_id, buyer, index)
-[ ] 4.8  Tests : achat OK ; achat après échéance rejeté ; fonds insuffisants ;
-         état du Vault et compteurs cohérents après N achats
+[x] 4.1  Contexte de comptes (Lottery, Vault, Ticket à créer, buyer signer)
+         -> seeds derives des champs du compte (lottery.round_id, .bump, .vault_bump)
+            Ticket seede par l'index global lottery.total_tickets (D21bis)
+[x] 4.2  Garde temporelle : refuser si now >= end_timestamp  -> SalesEnded
+[x] 4.3  Garde d'état : refuser si state != Open  -> LotteryNotOpen
+[x] 4.4  Transférer ticket_price (SOL) du buyer vers le Vault (CPI System Program)
+         -> CpiContext::new + anchor_lang::system_program::transfer
+[x] 4.5  Créer le Ticket PDA avec index = total_tickets courant
+[x] 4.6  Incrémenter total_tickets et pot_amount (checked arithmetic)
+[x] 4.7  Émettre l'event TicketBought (round_id, buyer, index)
+[x] 4.8  Tests : achat OK ; achat après échéance rejeté ; fonds insuffisants ;
+         état du Vault et compteurs cohérents après N achats  -> 8 passing
+         -> test echeance: round duration=1s + sleep(2s) ; test fonds: airdrop 0.01 SOL < prix 0.1
 
 
 --------------------------------------------------------------
 PHASE 5 — INSTRUCTION : draw_winner  (aléatoire isolé)
 --------------------------------------------------------------
-[ ] 5.1  Contexte : Lottery + authority (Signer, has_one = authority)
-[ ] 5.2  Garde temporelle : refuser si now < end_timestamp
-[ ] 5.3  Garde d'état : refuser si state != Open ; passer state=Drawing puis Closed
-[ ] 5.4  Cas limite : 0 ticket vendu -> fermer sans gagnant, ne pas planter
-[ ] 5.5  Fonction d'aléatoire ISOLÉE (slot hash + timestamp + total_tickets)
-         -> renvoie un index dans [0, total_tickets[
-[ ] 5.6  Stocker winner_index ; documenter EN GROS que c'est manipulable
-         (acceptable devnet uniquement, à remplacer par VRF en phase 2)
-[ ] 5.7  Émettre l'event WinnerDrawn (round_id, winner_index)
+[x] 5.1  Contexte : Lottery + authority (Signer, has_one = authority)
+         -> has_one = authority @ LotteryError::Unauthorized (erreur dediee ajoutee)
+[x] 5.2  Garde temporelle : refuser si now < end_timestamp  -> TooEarlyToDraw
+[x] 5.3  Garde d'état : refuser si state != Open ; transition directe Open -> Closed
+         -> Drawing reste defini dans l'enum mais inutilise au MVP (utile pour VRF async phase 2)
+[x] 5.4  Cas limite : 0 ticket vendu -> fermer sans gagnant (winner_index=None), ne pas planter
+         -> if total_tickets == 0 (evite un modulo par zero)
+[x] 5.5  Fonction d'aléatoire ISOLÉE pseudo_random_index(total_tickets, now)
+         -> slot + timestamp + total_tickets, renvoie un index dans [0, total_tickets[
+[x] 5.6  Stocker winner_index=Some(index) ; documente EN GROS comme MANIPULABLE
+         (devnet uniquement, remplacer par VRF -> cf PROD.1)
+[x] 5.7  Émettre l'event WinnerDrawn (round_id, winner_index: Option<u64>)
 [ ] 5.8  Tests : tirage avant échéance rejeté ; non-authority rejeté ;
          double tirage rejeté ; cas 0 ticket ; index dans les bornes
+         -> RESTE A FAIRE (cargo check OK, tests non ecrits)
 
 
 --------------------------------------------------------------
@@ -197,6 +205,32 @@ PHASE 11 — INTÉGRATION DE BOUT EN BOUT & FINITIONS
 [ ] 11.4  README : architecture, setup, lancement, captures
 [ ] 11.5  Nettoyage du code + commentaires + cohérence de nommage
 ==> JALON : MVP LIVRABLE POUR LE PORTFOLIO.
+
+
+==============================================================
+  /!\ BLOQUANT AVANT TOUT USAGE REEL / MAINNET  /!\
+  (rien de ceci n'est requis pour le MVP devnet, mais TOUT
+   est OBLIGATOIRE avant de toucher de la vraie valeur)
+==============================================================
+[ ] PROD.1  ALEATOIRE — remplacer IMPERATIVEMENT l'alea on-chain "simple"
+            (slot hash + timestamp + total_tickets) du draw_winner par une
+            source non manipulable : Switchboard VRF (alea verifiable deux-parties).
+            RAISON: l'alea on-chain actuel est MANIPULABLE PAR UN VALIDATEUR
+            (il controle slot hash/timestamp) -> un attaquant pourrait biaiser
+            le tirage en sa faveur. Acceptable UNIQUEMENT en devnet pedagogique.
+            L'alea est volontairement ISOLE dans une seule fonction pour rendre
+            ce remplacement quasi sans reecriture du reste (cf D29/D30/D31).
+[ ] PROD.2  Audit interne serieux du programme (re-revue securite complete,
+            relecture de toutes les contraintes de comptes, autorites, arithmetique).
+[ ] PROD.3  Revoir le modele d'autorite de draw_winner (cron centralise = point
+            de defaillance unique ; envisager permissionless + incitation, ou multisig).
+[ ] PROD.4  Tests de charge / cas limites a grande echelle (beaucoup de tickets,
+            collisions d'index concurrentes, rounds simultanes).
+[ ] PROD.5  Gestion des fonds: verifier rent-exemption du vault en toutes circonstances,
+            recuperation des comptes (close) et des lamports residuels.
+[ ] PROD.6  Considerer un mecanisme de remboursement / annulation si un round
+            ne peut pas se conclure (ex: 0 ticket, bug, draw jamais appele).
+==============================================================
 
 
 ==============================================================

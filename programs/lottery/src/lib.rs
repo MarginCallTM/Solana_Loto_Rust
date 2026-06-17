@@ -61,6 +61,94 @@ pub mod lottery {
         });
         Ok(())
     }
+
+    pub fn buy_ticket(ctx: Context<BuyTicket>) -> Result<()> {
+        // 1. Guards: refuse if the round is not open or sales habe ended.
+        require!(
+            ctx.accounts.lottery.state == LotteryState::Open,
+            LotteryError::LotteryNotOpen
+        );
+        let now = Clock::get()?.unix_timestamp;
+        require!(
+            now < ctx.accounts.lottery.end_timestamp,
+            LotteryError::SalesEnded
+        );
+
+        // 2. Read what we need before mutating anything.
+        let ticket_price = ctx.accounts.lottery.ticket_price;
+        let index = ctx.accounts.lottery.total_tickets;
+
+        // 3. Transfer the ticket price from the buyer to the vault (CPI).
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            anchor_lang::system_program::Transfer {
+                from: ctx.accounts.buyer.to_account_info(),
+                to: ctx.accounts.vault.to_account_info(),
+            },
+        );
+        anchor_lang::system_program::transfer(cpi_ctx, ticket_price)?;
+
+        // 4. Fill the freshly created Ticket account.
+        let ticket = &mut ctx.accounts.ticket;
+        ticket.round_id = ctx.accounts.lottery.round_id;
+        ticket.buyer = ctx.accounts.buyer.key();
+        ticket.index = index;
+        ticket.bump = ctx.bumps.ticket;
+
+        // 5. Update the lottery counters (checked arithmetic).
+        let lottery = &mut ctx.accounts.lottery;
+        lottery.total_tickets = lottery
+            .total_tickets
+            .checked_add(1)
+            .ok_or(LotteryError::MathOverflow)?;
+        lottery.pot_amount = lottery
+            .pot_amount
+            .checked_add(ticket_price)
+            .ok_or(LotteryError::MathOverflow)?;
+
+        // 6. Emit the event for the off-chain indexer.
+        emit!(TicketBought {
+            round_id: lottery.round_id,
+            buyer: ticket.buyer,
+            index,
+        });
+
+        Ok(())
+    }
+
+    pub fn draw_winner(ctx: Context<DrawWinner>) -> Result<()> {
+        // Guard: the round must still be open (not already drawn).
+        require!(
+            ctx.accounts.lottery.state == LotteryState::Open,
+            LotteryError::LotteryNotOpen
+        );
+        // Guard: only allowed once the deadline has passed.
+        let now = Clock::get()?.unix_timestamp;
+        require!(
+            now >= ctx.accounts.lottery.end_timestamp,
+            LotteryError::TooEarlyToDraw
+        );
+
+        let lottery = &mut ctx.accounts.lottery;
+
+        if lottery.total_tickets == 0 {
+            // No ticket sold: close the round with no winner. Never panic
+            lottery.winner_index = None;
+        } else {
+            let index = pseudo_random_index(lottery.total_tickets, now)?;
+            lottery.winner_index = Some(index);
+        }
+
+        lottery.state = LotteryState::Closed;
+
+        emit!(WinnerDrawn {
+            round_id: lottery.round_id,
+            winner_index: lottery.winner_index,
+        });
+
+        Ok(())
+    }
+
 }
 
 #[derive(Accounts)]
@@ -92,6 +180,56 @@ pub struct InitializeLottery<'info> {
     // Required by Anchor to create accounts (CPI to the System Program)
     pub system_program: Program<'info, System>,
 
+}
+
+
+
+#[derive(Accounts)]
+pub struct BuyTicket<'info> {
+    // The round being played. Re-derived from its own stored round_id + bump.
+    #[account(
+        mut,
+        seeds = [LOTTERY_SEED, &lottery.round_id.to_le_bytes()],
+        bump = lottery.bump,
+    )]
+    pub lottery: Account<'info, Lottery>,
+
+    // The pot. Mutable because it receives the ticket payment.
+    #[account(
+        mut,
+        seeds = [VAULT_SEED, &lottery.round_id.to_le_bytes()],
+        bump = lottery.vault_bump,
+    )]
+    pub vault: SystemAccount<'info>,
+
+    // The ticket being created, at index = current total_tickets.
+    #[account(
+        init,
+        payer = buyer,
+        space = Ticket::LEN,
+        seeds = [TICKET_SEED, &lottery.round_id.to_le_bytes(), &lottery.total_tickets.to_le_bytes()],
+        bump,
+    )]
+    pub ticket: Account<'info, Ticket>,
+
+    // The player: signs and pays (ticket price + ticket account rent).
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct DrawWinner<'info> {
+    // Only the round's authority may draw. 'has_one' checks lottery.authority == authority.
+    #[account(
+        mut,
+        seeds = [LOTTERY_SEED, &lottery.round_id.to_le_bytes()],
+        bump = lottery.bump,
+        has_one = authority @ LotteryError::Unauthorized,
+    )]
+    pub lottery: Account<'info, Lottery>,
+    pub authority: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -146,6 +284,25 @@ impl Ticket {
         + 1;    // bump: u8
 }
 
+// ⚠️  INSECURE ON-CHAIN RANDOMNESS — DEVNET ONLY.
+// This mixes the most recent slot hash, the current unix time and the ticket
+// count into a single number, then reduces it modulo `total_tickets`.
+//
+// A block-producing validator can influence the slot hash and the timestamp,
+// so this draw IS MANIPULABLE by a validator and MUST be replaced by a
+// verifiable source (Switchboard VRF) before any real-value use. See PROD.1.
+//
+// Isolated on purpose (D29): swapping in VRF later should not touch draw_winner.
+fn pseudo_random_index(total_tickets: u64, now: i64) -> Result<u64> {
+    // Recent slot hashes sysvar gives a recent block hash on-chain entropy.
+    let recent = Clock::get()?.slot;
+    let seed = (recent as u128)
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(now as u128)
+        .wrapping_add(total_tickets as u128);
+    Ok((seed % total_tickets as u128) as u64)
+}
+
 // Lifecycle of a lottery round.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
 pub enum LotteryState {
@@ -161,6 +318,21 @@ pub struct LotteryInitialized {
     pub authority: Pubkey,
     pub ticket_price: u64,
     pub end_timestamp: i64,
+}
+
+// Emitted on each ticket purchase. Consumed off-chain by the indexer
+#[event]
+pub struct TicketBought {
+    pub round_id: u64,
+    pub buyer: Pubkey,
+    pub index: u64,
+}
+
+// Emitted when a round is drawn. winner_index is None if no ticket was sold.
+#[event]
+pub struct WinnerDrawn {
+    pub round_id: u64,
+    pub winner_index: Option<u64>,
 }
 
 // Custum program errors. Anchor numbers them starting at 6000
@@ -184,4 +356,6 @@ pub enum LotteryError {
     AlreadyClaimed,
     #[msg("Arithmetic overflow.")]
     MathOverflow,
+    #[msg("Signer is not the authority of this round.")]
+    Unauthorized,
 }

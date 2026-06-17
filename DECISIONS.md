@@ -82,6 +82,7 @@ Anchor en green-field (phases 1-7), puis réconcilier et brancher le frontend.
 | D20 | `Vault` (PDA) — seeds `["vault", round_id]` — détient les SOL, **séparé de l'état** | ✅ acté |
 | D20bis | Le Vault n'est **pas créé** à l'init : un PDA ne détenant que des lamports est **financé paresseusement** au 1er `buy_ticket` (le System Program le crée au transfert). À l'init on le déclare seulement pour dériver/stocker son bump. Raison: pattern idiomatique + contourne un bug Anchor 0.31.1 (`init` + `SystemAccount` => macro `Accounts` génère du code cassé `try_from`/`try_from_unchecked`) | ✅ acté |
 | D21 | `Ticket` (PDA) — **un compte par achat** (approche scalable, pas de liste inline) | ✅ acté |
+| D21bis | **Plusieurs tickets par wallet autorisés** (1 ticket = 1 chance). Ticket PDA seedé par l'**index global** `["ticket", round_id, total_tickets_courant]`, pas par le buyer. Le buyer est stocké dans le champ `Ticket.buyer` | ✅ acté |
 | D22 | `LotteryState` enum = `Open` / `Drawing` / `Closed` | ✅ acté |
 
 ### Champs de `Lottery` (référence — noms exacts à respecter)
