@@ -32,7 +32,8 @@ pub mod lottery {
     ) -> Result<()> {
         // Reject non-positive durations (a round must last some time)
         require!(duration > 0, LotteryError::InvalidDuration);
-
+        // Reject a zero ticket price (free tickets/ empty pot would be meaningless)
+        require!(ticket_price > 0, LotteryError::InvalidTicketPrice);
         // Read the on-chain clock to compute the round deadline.
         let now = Clock::get()?.unix_timestamp;
         let end_timestamp = now
@@ -433,6 +434,8 @@ pub struct PrizeClaimed {
 pub enum LotteryError {
     #[msg("Duration must be strictly positive.")]
     InvalidDuration,
+    #[msg("Ticket price must be strictly positive.")]
+    InvalidTicketPrice,
     #[msg("The lottery is not open for ticket sales.")]
     LotteryNotOpen,
     #[msg("Ticket sales have ended for this round.")]

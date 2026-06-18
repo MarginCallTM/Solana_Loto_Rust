@@ -153,6 +153,29 @@ describe("lottery", () => {
     }
   });
 
+  it("rejects a zero ticket price", async () => {
+    const roundId = new anchor.BN(3);
+    const ticketPrice = new anchor.BN(0); // invalid
+    const duration = new anchor.BN(3600); // valid, to isolate the price check
+    const {lottery, vault} = pdasFor(roundId);
+
+    try {
+      await program.methods
+      .initializeLottery(roundId, ticketPrice, duration)
+      .accounts({
+        lottery,
+        vault,
+        authority: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+      assert.fail("expected the instruction to throw");
+    } catch (err) {
+      expect(err).to.be.instanceOf(anchor.AnchorError);
+      assert.equal(err.error.errorCode.code, "InvalidTicketPrice");
+    }
+  });
+
   it("rejects creating the same round twice", async () => {
     const roundId = new anchor.BN(1); // already created in the first test
     const ticketPrice = new anchor.BN(100_000_000);
