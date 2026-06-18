@@ -149,6 +149,51 @@ pub mod lottery {
         Ok(())
     }
 
+    pub fn payout(ctx: Context<Payout>) -> Result<()> {
+        // -- Checks ---
+        require!(
+            ctx.accounts.lottery.state == LotteryState::Closed,
+            LotteryError::LotteryNotClosed
+        );
+        require!(!ctx.accounts.lottery.claimed, LotteryError::AlreadyClaimed);
+        let winner_index = ctx
+            .accounts
+            .lottery
+            .winner_index
+            .ok_or(LotteryError::NoWinner)?;
+        require!(
+            ctx.accounts.ticket.index == winner_index,
+            LotteryError::NotTheWinner
+        );
+
+        let amount = ctx.accounts.lottery.pot_amount;
+        let round_bytes = ctx.accounts.lottery.round_id.to_le_bytes();
+        let vault_bump = ctx.accounts.lottery.vault_bump;
+
+        // -- Effect: Mark claimed BEFORE the transfer (checks-effects-interactions) ---
+        ctx.accounts.lottery.claimed = true;
+
+        // -- Interaction: move the pot from the vault PDA to the winner ---
+        // The vault has no private key: the program signs for it with its seeds.
+        let signer_seeds: &[&[&[u8]]] = &[&[VAULT_SEED, &round_bytes, &[vault_bump]]];
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.system_program.to_account_info(),
+            anchor_lang::system_program::Transfer {
+                from: ctx.accounts.vault.to_account_info(),
+                to: ctx.accounts.winner.to_account_info(),
+            },
+            signer_seeds,
+        );
+        anchor_lang::system_program::transfer(cpi_ctx, amount)?;
+
+        emit!(PrizeClaimed {
+            round_id: ctx.accounts.lottery.round_id,
+            winner: ctx.accounts.winner.key(),
+            amount,
+        });
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -231,6 +276,46 @@ pub struct DrawWinner<'info> {
     pub lottery: Account<'info, Lottery>,
     pub authority: Signer<'info>,
 }
+
+#[derive(Accounts)]
+pub struct Payout<'info> {
+    #[account(
+        mut,
+        seeds = [LOTTERY_SEED, &lottery.round_id.to_le_bytes()],
+        bump = lottery.bump,
+    )]
+    pub lottery: Account<'info, Lottery>,
+    
+    // The pot. Mutable because lamports leave it.
+    #[account(
+        mut,
+        seeds = [VAULT_SEED, &lottery.round_id.to_le_bytes()],
+        bump = lottery.vault_bump,
+    )]
+    pub vault: SystemAccount<'info>,
+
+    // The winning ticket: its address must derive from THIS round + ticket.index.
+    #[account(
+        seeds = [TICKET_SEED, &lottery.round_id.to_le_bytes(), &ticket.index.to_le_bytes()],
+        bump = ticket.bump,
+    )]
+    pub ticket: Account<'info, Ticket>,
+
+    // The recipient: Must be the buyer of the winning ticket (push model).
+    #[account(
+        mut,
+        address = ticket.buyer @ LotteryError::NotTheWinner,
+    )]
+    pub winner: SystemAccount<'info>,
+
+    // Anyone can pay the tx fee and trigger the payout (a cron, typically).
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+
 
 #[derive(Accounts)]
 pub struct Ping {}
@@ -333,6 +418,14 @@ pub struct TicketBought {
 pub struct WinnerDrawn {
     pub round_id: u64,
     pub winner_index: Option<u64>,
+}
+
+// Emitted when the pot is paid out to the winner.
+#[event]
+pub struct PrizeClaimed {
+    pub round_id: u64,
+    pub winner: Pubkey,
+    pub amount: u64,
 }
 
 // Custum program errors. Anchor numbers them starting at 6000

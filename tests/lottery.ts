@@ -6,6 +6,7 @@ import {
   SendTransactionError,
   Keypair,
   LAMPORTS_PER_SOL,
+  SystemProgram,
 } from "@solana/web3.js";
 import { assert, expect } from "chai";
 
@@ -62,6 +63,19 @@ describe("lottery", () => {
   };
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  // Wait until the on-chain clock has passed the round's deadline.
+  // Polls the validator clock (not wall-clock) to avoid timing flakiness.
+  const waitUntilExpired = async (lottery: PublicKey) => {
+    const lot = await program.account.lottery.fetch(lottery);
+    const deadline = lot.endTimestamp.toNumber();
+    for (;;) {
+      const slot = await provider.connection.getSlot();
+      const t = await provider.connection.getBlockTime(slot);
+      if (t !== null && t > deadline) break;
+      await sleep(400);
+    }
+  };
 
   // Helper: buy one ticket at the given index from the provider wallet.
   const buyOneTicket = async (
@@ -282,7 +296,7 @@ describe("lottery", () => {
     const ticket = ticketPdaFor(roundId, new anchor.BN(0));
 
     // Wait past the deadline.
-    await sleep(2000);
+    await waitUntilExpired(lottery);
 
     try {
       await program.methods
@@ -308,7 +322,7 @@ describe("lottery", () => {
     const { lottery, vault } = await initRound(
       roundId,
       ticketPrice,
-      new anchor.BN(2) // short round
+      new anchor.BN(6) // long enough for 3 sequential buys
     );
 
     // Buy 3 tickets, then let the round expire.
@@ -316,7 +330,7 @@ describe("lottery", () => {
     for (let i = 0; i < count; i++) {
       await buyOneTicket(roundId, lottery, vault, new anchor.BN(i));
     }
-    await sleep(2500);
+    await waitUntilExpired(lottery);
 
     await program.methods
       .drawWinner()
@@ -340,7 +354,7 @@ describe("lottery", () => {
       ticketPrice,
       new anchor.BN(1)
     );
-    await sleep(2000);
+    await waitUntilExpired(lottery);
 
     await program.methods
       .drawWinner()
@@ -381,7 +395,7 @@ describe("lottery", () => {
       ticketPrice,
       new anchor.BN(1)
     );
-    await sleep(2000);
+    await waitUntilExpired(lottery);
 
     // A different signer that is not the round's authority.
     const intruder = Keypair.generate();
@@ -413,7 +427,7 @@ describe("lottery", () => {
       new anchor.BN(2)
     );
     await buyOneTicket(roundId, lottery, vault, new anchor.BN(0));
-    await sleep(2500);
+    await waitUntilExpired(lottery);
 
     // First draw succeeds.
     await program.methods
@@ -433,4 +447,177 @@ describe("lottery", () => {
       assert.equal(err.error.errorCode.code, "LotteryNotOpen");
     }
   });
+  it("pays out the pot to the winner", async () => {
+    const roundId = new anchor.BN(30);
+    const ticketPrice = new anchor.BN(0.05 * LAMPORTS_PER_SOL);
+    const {lottery, vault} = await initRound(
+      roundId,
+      ticketPrice,
+      new anchor.BN(8) // long enough for airdrop + 3 sequential buys
+    );
+
+    // A dedicated player buys all the tickets, so the winner is this player
+    // (and NOT the transaction fee payer): its balance delta equals the pot exactly.
+    const player = Keypair.generate();
+    const air = await provider.connection.requestAirdrop(
+      player.publicKey,
+      1 * LAMPORTS_PER_SOL
+    );
+    await provider.connection.confirmTransaction(air, "confirmed");
+
+    const count = 3;
+    for (let i = 0; i < count; i++) {
+      const ticket = ticketPdaFor(roundId, new anchor.BN(i));
+      await program.methods
+        .buyTicket()
+        .accounts({
+          lottery,
+          vault,
+          ticket,
+          buyer: player.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([player])
+        .rpc();
+    }
+    await waitUntilExpired(lottery);
+
+    await program.methods
+      .drawWinner()
+      .accounts({lottery, authority: provider.wallet.publicKey})
+      .rpc();
+
+    // Read who won, then derive the winning ticket PDA.
+    const drawn = await program.account.lottery.fetch(lottery);
+    const winningTicket = ticketPdaFor(roundId, drawn.winnerIndex);
+    const winner = player.publicKey;
+
+    const before = await provider.connection.getBalance(winner);
+
+    // Fee payer defaults to the provider wallet (not the winner), so the
+    // winner's balance change equals the pot exactly.
+    await program.methods
+      .payout()
+      .accounts({
+        lottery,
+        vault,
+        ticket: winningTicket,
+        winner,
+        payer: provider.wallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .rpc();
+
+    const after = await provider.connection.getBalance(winner);
+    const pot = ticketPrice.toNumber() * count;
+    assert.equal(after - before, pot);
+
+    // Vault drained, prize marked as claimed.
+    assert.equal(await provider.connection.getBalance(vault), 0);
+    const acc = await program.account.lottery.fetch(lottery);
+    assert.equal(acc.claimed, true);
+  });
+  it("rejects payout before the draw", async () => {
+    const roundId = new anchor.BN(31);
+    const ticketPrice = new anchor.BN(0.05 * LAMPORTS_PER_SOL);
+    const {lottery, vault} = await initRound(
+      roundId,
+      ticketPrice,
+      new anchor.BN(3600)
+    );
+    await buyOneTicket(roundId, lottery, vault, new anchor.BN(0));
+    const ticket = ticketPdaFor(roundId, new anchor.BN(0));
+
+    try {
+      await program.methods
+        .payout()
+        .accounts({
+          lottery,
+          vault,
+          ticket,
+          winner: provider.wallet.publicKey,
+          payer: provider.wallet.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("expected the instruction to throw");
+    } catch (err) {
+      expect(err).to.be.instanceOf(anchor.AnchorError);
+      assert.equal(err.error.errorCode.code, "LotteryNotClosed");
+    }
+  });
+  it("rejects payout to a wrong recipient", async () => {
+    const roundId = new anchor.BN(32);
+    const ticketPrice = new anchor.BN(0.05 * LAMPORTS_PER_SOL);
+    const {lottery, vault} = await initRound(
+      roundId,
+      ticketPrice,
+      new anchor.BN(2)
+    );
+    await buyOneTicket(roundId, lottery, vault, new anchor.BN(0));
+    await waitUntilExpired(lottery);
+    await program.methods
+      .drawWinner()
+      .accounts({lottery, authority: provider.wallet.publicKey})
+      .rpc();
+    
+    const drawn = await program.account.lottery.fetch(lottery);
+    const winningTicket = ticketPdaFor(roundId, drawn.winnerIndex);
+    const intruder = Keypair.generate();
+
+    try {
+      await program.methods
+        .payout()
+        .accounts({
+          lottery,
+          vault,
+          ticket: winningTicket,
+          winner: intruder.publicKey, // not the ticket's buyer
+          payer: provider.wallet.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      assert.fail("expected the instruction to throw");
+    } catch (err) {
+      expect(err).to.be.instanceOf(anchor.AnchorError);
+      assert.equal(err.error.errorCode.code, "NotTheWinner");
+    }
+  });
+  it("rejects a double payout", async () => {
+    const roundId = new anchor.BN(33);
+    const ticketPrice = new anchor.BN(0.05 * LAMPORTS_PER_SOL);
+    const {lottery, vault} = await initRound(
+      roundId,
+      ticketPrice,
+      new anchor.BN(2)
+    );
+    await buyOneTicket(roundId, lottery, vault, new anchor.BN(0));
+    await waitUntilExpired(lottery);
+    await program.methods
+      .drawWinner()
+      .accounts({lottery, authority: provider.wallet.publicKey})
+      .rpc();
+
+    const drawn = await program.account.lottery.fetch(lottery);
+    const winningTicket = ticketPdaFor(roundId, drawn.winnerIndex);
+    const accounts = {
+      lottery,
+      vault,
+      ticket: winningTicket,
+      winner: provider.wallet.publicKey,
+      payer: provider.wallet.publicKey,
+      systemProgram: anchor.web3.SystemProgram.programId,
+    };
+
+    await program.methods.payout().accounts(accounts).rpc();
+
+    try {
+      await program.methods.payout().accounts(accounts).rpc();
+      assert.fail("expected the instruction to throw");
+    } catch (err) {
+      expect(err).to.be.instanceOf(anchor.AnchorError);
+      assert.equal(err.error.errorCode.code, "AlreadyClaimed");
+    }
+  })
+
 });

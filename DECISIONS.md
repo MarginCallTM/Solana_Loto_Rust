@@ -95,7 +95,7 @@ Anchor en green-field (phases 1-7), puis réconcilier et brancher le frontend.
 | D23 | `initialize_lottery(round_id, ticket_price, duration)` | authority crée le round, init Lottery + Vault. **round_id fourni en paramètre** (Option A, MVP mono-authority) ; compteur global on-chain = phase 2 si création permissionless |
 | D24 | `buy_ticket()` | transfert SOL -> Vault, crée Ticket PDA, incrémente compteurs |
 | D25 | `draw_winner()` | authority, après échéance : sélectionne l'index gagnant |
-| D26 | `claim_prize()` | le gagnant retire le pot du Vault |
+| D26 | `payout()` (ex-`claim_prize`) | **Modèle PUSH** : n'importe qui peut déclencher (un cron off-chain l'appelle automatiquement), mais le pot va **toujours** vers le `buyer` du ticket gagnant, jamais vers le caller. Vérifs: state=Closed, winner_index=Some, ticket.index==winner_index, recipient==ticket.buyer, anti double-claim (claimed). NB: rien n'est "automatique" on-chain (pas de cron natif Solana) — l'automatisme vit dans le cron backend (phase 11.3). Tirage et paiement restent 2 instructions séparées (on ne connaît le gagnant qu'APRÈS draw_winner) |
 
 ### Events (au minimum)
 | # | Event |

@@ -124,23 +124,29 @@ PHASE 5 — INSTRUCTION : draw_winner  (aléatoire isolé)
 [x] 5.6  Stocker winner_index=Some(index) ; documente EN GROS comme MANIPULABLE
          (devnet uniquement, remplacer par VRF -> cf PROD.1)
 [x] 5.7  Émettre l'event WinnerDrawn (round_id, winner_index: Option<u64>)
-[ ] 5.8  Tests : tirage avant échéance rejeté ; non-authority rejeté ;
-         double tirage rejeté ; cas 0 ticket ; index dans les bornes
-         -> RESTE A FAIRE (cargo check OK, tests non ecrits)
+[x] 5.8  Tests : tirage avant échéance rejeté ; non-authority rejeté ;
+         double tirage rejeté ; cas 0 ticket ; index dans les bornes  -> 13 passing
 
 
 --------------------------------------------------------------
 PHASE 6 — INSTRUCTION : claim_prize
 --------------------------------------------------------------
-[ ] 6.1  Contexte : Lottery, Vault, Ticket gagnant, winner signer
-[ ] 6.2  Vérifier state == Closed
-[ ] 6.3  Vérifier que le Ticket présenté correspond bien au winner_index
-[ ] 6.4  Vérifier que le claimer == buyer du ticket gagnant
-[ ] 6.5  Transférer le pot du Vault vers le gagnant (signer seeds du PDA)
-[ ] 6.6  Marquer le prix comme réclamé (anti double-claim)
-[ ] 6.7  Émettre l'event PrizeClaimed
-[ ] 6.8  Tests : claim OK ; claim par non-gagnant rejeté ; double-claim rejeté ;
-         claim avant tirage rejeté ; solde du gagnant correct après claim
+[x] 6.1  Contexte : Lottery, Vault, Ticket gagnant, winner (recipient), payer signer
+         -> RENOMME en `payout` (modele PUSH, cf D26) ; recipient force == ticket.buyer
+[x] 6.2  Vérifier state == Closed  -> LotteryNotClosed
+[x] 6.3  Vérifier que le Ticket présenté correspond bien au winner_index  -> NotTheWinner
+         -> + winner_index doit etre Some sinon NoWinner (cas 0 ticket)
+[x] 6.4  Vérifier que le recipient == buyer du ticket gagnant  -> address = ticket.buyer
+[x] 6.5  Transférer le pot du Vault vers le gagnant (signer seeds du PDA)
+         -> CpiContext::new_with_signer + signer_seeds [VAULT_SEED, round_id, vault_bump]
+[x] 6.6  Marquer le prix comme réclamé (anti double-claim)  -> claimed=true AVANT transfert (CEI)
+[x] 6.7  Émettre l'event PrizeClaimed (round_id, winner, amount)
+[x] 6.8  Tests : payout OK ; mauvais destinataire rejeté ; double-payout rejeté ;
+         payout avant tirage rejeté ; solde du gagnant correct apres payout  -> 17 passing
+         -> fee payer != winner (sinon le gagnant paie les frais et le delta != pot)
+         -> attente d'echeance via waitUntilExpired (horloge ON-CHAIN, pas sleep) = tests stables
+         -> cas 0 ticket / NoWinner non teste isolement: impossible de fournir un ticket gagnant
+            quand 0 vendu (contraintes de comptes rejettent avant); couvert par 5.x (draw sans gagnant)
 
 
 --------------------------------------------------------------
