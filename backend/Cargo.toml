@@ -26,9 +26,6 @@ sqlx = { version = "0.7.4", default-features = false, features = [
     "macros"
 ] }
 
-# Redis
-redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
-
 # Solana
 solana-client = "2"
 solana-sdk = "2"

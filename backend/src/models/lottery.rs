@@ -46,7 +46,7 @@ pub struct LotteryStats {
 }
 
 impl Lottery {
-   pub fn to_state(&self) -> LotteryStats {
+   pub fn to_stats(&self) -> LotteryStats {
         let now = Utc::now();
         // "Open" + not yet expired => a remaining time make sense.
         let time_remaining = if self.state == "Open" && self.end_time > now {
