@@ -152,14 +152,28 @@ PHASE 6 — INSTRUCTION : claim_prize
 --------------------------------------------------------------
 PHASE 7 — DURCISSEMENT & REVUE SÉCURITÉ DU PROGRAMME
 --------------------------------------------------------------
-[ ] 7.1  Revue : toutes les contraintes de comptes (owner, seeds, signer)
-[ ] 7.2  Revue : aucune arithmétique nue sur les lamports (checked_*)
-[ ] 7.3  Revue : aucun unwrap() sauvage ; erreurs custom partout
-[ ] 7.4  Revue : autorités (qui peut appeler quoi) cohérentes
-[ ] 7.5  Vérifier le rent / exemption des comptes créés
-[ ] 7.6  Faire tourner la suite complète de tests (succès + échecs)
-[ ] 7.7  Déployer sur devnet ; vérifier l'IDL généré
-==> JALON : MVP ON-CHAIN COMPLET ET VERT. Frontend autorisé à partir d'ici.
+[x] 7.1  Revue : toutes les contraintes de comptes (owner, seeds, signer)  -> OK
+         -> faux compte impossible (discriminator + seeds + bump) ; vault/ticket epingles a lottery ;
+            payout: address = ticket.buyer empeche de detourner le pot (modele push)
+[x] 7.2  Revue : aucune arithmétique nue sur les lamports (checked_*)  -> OK
+         -> seul wrapping_* = pseudo_random_index (brassage de bits, volontaire)
+[x] 7.3  Revue : aucun unwrap() sauvage ; erreurs custom partout  -> OK
+[x] 7.4  Revue : autorités (qui peut appeler quoi) cohérentes  -> OK
+         -> draw_winner: has_one authority ; payout: permissionless par design (fonds -> gagnant)
+[x] 7.5  Vérifier le rent / exemption des comptes créés  -> OK (init gere ; vault >> min avec prix reels)
+[x] 7.6  Faire tourner la suite complète de tests (succès + échecs)  -> 18 passing
+         -> FINDING corrige: ajout require!(ticket_price > 0) + erreur InvalidTicketPrice + test
+[x] 7.7  Déployer sur devnet ; vérifier l'IDL généré  -> FAIT le 2026-06-20
+         -> DEBLOQUE: Agave a RE-ACTIVE les deploys --arch v0 sur devnet (cf maj issue #13297, 19/06).
+            Recette: cargo build-sbf --manifest-path programs/lottery/Cargo.toml --arch v0
+                     puis solana program deploy --url devnet (CARGO_TARGET_DIR=racine).
+         -> Program LIVE: DD5CPAQWUtKSBajtNT9w4QbJysQnuWeDZ6yCdXKAYwro
+            owner BPFLoaderUpgradeable, authority = wallet FMzJ..., ~1.82 SOL bloques dans le compte programme.
+         -> Voie propre long terme (non requise tant que v0 marche): --arch v3 + platform-tools >= v1.53 (on a v1.51).
+         -> SMOKE TEST OK le 2026-06-20: scripts/smoke-devnet.ts (ping) confirme via tx que le programme
+            S'EXECUTE sur le runtime 4.1 de devnet (pas seulement charge). Execution validee.
+         -> RESTE A FAIRE dans 7.7 (optionnel): publier l'IDL on-chain sur devnet (make idl-devnet) pour que les clients le fetchent.
+==> JALON : MVP ON-CHAIN COMPLET ET VERT (atteint en LOCALNET). Frontend peut demarrer sur localnet.
 
 
 --------------------------------------------------------------

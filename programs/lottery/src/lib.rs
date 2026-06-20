@@ -64,7 +64,7 @@ pub mod lottery {
     }
 
     pub fn buy_ticket(ctx: Context<BuyTicket>) -> Result<()> {
-        // 1. Guards: refuse if the round is not open or sales habe ended.
+        // 1. Guards: refuse if the round is not open or sales have ended.
         require!(
             ctx.accounts.lottery.state == LotteryState::Open,
             LotteryError::LotteryNotOpen
@@ -133,7 +133,7 @@ pub mod lottery {
         let lottery = &mut ctx.accounts.lottery;
 
         if lottery.total_tickets == 0 {
-            // No ticket sold: close the round with no winner. Never panic
+            // No ticket sold: close the round with no winner. Never panic.
             lottery.winner_index = None;
         } else {
             let index = pseudo_random_index(lottery.total_tickets, now)?;
@@ -344,7 +344,7 @@ impl Lottery {
         + 8     // round_id: u64
         + 32    // authority: Pubkey
         + 8     // ticket_price: u64
-        + 8     // total_ticket: u64
+        + 8     // total_tickets: u64
         + 8     // pot_amount: u64
         + 8     // end_timestamp: i64
         + 1     // state: LotteryState (enum tag)
@@ -371,16 +371,16 @@ impl Ticket {
 }
 
 // ⚠️  INSECURE ON-CHAIN RANDOMNESS — DEVNET ONLY.
-// This mixes the most recent slot hash, the current unix time and the ticket
+// This mixes the current slot number, the current unix time and the ticket
 // count into a single number, then reduces it modulo `total_tickets`.
 //
-// A block-producing validator can influence the slot hash and the timestamp,
+// A block-producing validator can influence the slot and the timestamp,
 // so this draw IS MANIPULABLE by a validator and MUST be replaced by a
 // verifiable source (Switchboard VRF) before any real-value use. See PROD.1.
 //
 // Isolated on purpose (D29): swapping in VRF later should not touch draw_winner.
 fn pseudo_random_index(total_tickets: u64, now: i64) -> Result<u64> {
-    // Recent slot hashes sysvar gives a recent block hash on-chain entropy.
+    // Current slot number, used as cheap (and manipulable) on-chain entropy.
     let recent = Clock::get()?.slot;
     let seed = (recent as u128)
         .wrapping_mul(6364136223846793005)
@@ -429,7 +429,7 @@ pub struct PrizeClaimed {
     pub amount: u64,
 }
 
-// Custum program errors. Anchor numbers them starting at 6000
+// Custom program errors. Anchor numbers them starting at 6000.
 #[error_code]
 pub enum LotteryError {
     #[msg("Duration must be strictly positive.")]

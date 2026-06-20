@@ -8,6 +8,9 @@ skip-lint = false
 [programs.localnet]
 lottery = "DD5CPAQWUtKSBajtNT9w4QbJysQnuWeDZ6yCdXKAYwro"
 
+[programs.devnet]
+lottery = "DD5CPAQWUtKSBajtNT9w4QbJysQnuWeDZ6yCdXKAYwro"
+
 [registry]
 url = "https://api.apr.dev"
 
