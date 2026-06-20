@@ -7,3 +7,6 @@ pub use user::UserRepository;
 pub use lottery::LotteryRepository;
 pub use ticket::TicketRepository;
 pub use transaction::TransactionRepository;
+
+#[cfg(test)]
+mod tests;

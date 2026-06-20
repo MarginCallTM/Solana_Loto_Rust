@@ -179,12 +179,34 @@ PHASE 7 — DURCISSEMENT & REVUE SÉCURITÉ DU PROGRAMME
 --------------------------------------------------------------
 PHASE 8 — BASE DE DONNÉES (REPRISE de l'existant)
 --------------------------------------------------------------
-[ ] 8.1  Réutiliser le schéma existant (users, lotteries, tickets, transactions)
-[ ] 8.2  Vérifier l'alignement des champs avec les events on-chain réels
-         (winning_ticket_number, program_account, transaction_signature...)
-[ ] 8.3  Ajuster le schéma si besoin pour coller au programme Anchor finalisé
-[ ] 8.4  Corriger les scories repérées en phase A (casse SQL, typos)
-[ ] 8.5  Confirmer le rôle : cache reconstructible, jamais de logique critique (D9)
+[x] 8.1  Réutiliser le schéma existant (users, lotteries, tickets, transactions)  -> 4 tables conservées
+[x] 8.2  Vérifier l'alignement des champs avec les events on-chain réels  -> analyse d'écart faite
+[x] 8.3  Ajuster le schéma pour coller au programme Anchor finalisé  -> schéma réécrit (fidélité max):
+         + round_id BIGINT UNIQUE (clé naturelle on-chain), lottery_account UNIQUE, authority
+         + total_tickets/winner_index/ticket_index en BIGINT (u64), pot_amount (ex-prize_pool)
+         + state ('Open'/'Drawing'/'Closed') + claimed, buyer_address/winner_address (pubkeys = source de vérité)
+         + ancres d'idempotence: round_id, lottery_account, signature, (lottery_id, ticket_index)
+         + SUPPRIME le CHECK end_time>created_at (cassait le rejeu d'historique)
+[x] 8.4  Corriger les scories (typos SQL, tx_type CHECK = vrais noms d'instructions)
+[x] 8.5  Confirmer le rôle : cache reconstructible, jamais de logique critique (D9)  -> OK
+         -> models Rust + repositories alignés sur le nouveau schéma; cargo check vert (API parquée).
+[x] 8.6  TEST: monter un Postgres, appliquer la migration, vérifier insert/select via repositories
+         -> FAIT: backend/src/db/repositories/tests.rs, 5 tests #[sqlx::test] (base éphémère/test),
+            round-trip Lottery/Ticket/Transaction + 2 cas d'échec d'idempotence (round_id, ticket_index)
+            + enum tx_type vs CHECK. 5 passed. Lancé via DATABASE_URL=... cargo test (Postgres NATIF).
+
+
+--------------------------------------------------------------
+PHASE 8bis — OUTILLAGE / DOCKER (reproductibilité dev, valeur portfolio)
+--------------------------------------------------------------
+  Rappel conceptuel: Postgres = la base; Docker = la boîte standardisée qui fait tourner un service
+  (Postgres, l'API, l'indexer) à l'identique partout. Docker n'apporte PAS la scalabilité DB en soi
+  (ça = index, pooling/PgBouncer, réplicas, managé). En prod: API/indexer dockerisés + Postgres MANAGÉ.
+[ ] 8bis.1  Ajouter un docker-compose.yml avec un service postgres (volume persistant, port 5432)
+[ ] 8bis.2  Fichier .env (DATABASE_URL) + .env.example versionné; .env dans .gitignore
+[ ] 8bis.3  Documenter "docker compose up" dans le README (onboarding 1 commande)
+[ ] 8bis.4  Rejouer le test 8.6 contre le Postgres dockerisé -> parité dev/prod
+[ ] 8bis.5  (plus tard) dockeriser l'API Rust + l'indexer; prod -> Postgres managé (Supabase/Neon/RDS)
 
 
 --------------------------------------------------------------
