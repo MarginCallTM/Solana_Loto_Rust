@@ -202,10 +202,12 @@ PHASE 8bis — OUTILLAGE / DOCKER (reproductibilité dev, valeur portfolio)
   Rappel conceptuel: Postgres = la base; Docker = la boîte standardisée qui fait tourner un service
   (Postgres, l'API, l'indexer) à l'identique partout. Docker n'apporte PAS la scalabilité DB en soi
   (ça = index, pooling/PgBouncer, réplicas, managé). En prod: API/indexer dockerisés + Postgres MANAGÉ.
-[ ] 8bis.1  Ajouter un docker-compose.yml avec un service postgres (volume persistant, port 5432)
-[ ] 8bis.2  Fichier .env (DATABASE_URL) + .env.example versionné; .env dans .gitignore
-[ ] 8bis.3  Documenter "docker compose up" dans le README (onboarding 1 commande)
-[ ] 8bis.4  Rejouer le test 8.6 contre le Postgres dockerisé -> parité dev/prod
+[x] 8bis.1  docker-compose.yml avec service postgres:16 (volume persistant, healthcheck, port 5433:5432)
+            -> port hôte 5433 car le Postgres natif occupe déjà 5432
+[x] 8bis.2  .env + .env.example (POSTGRES_*, DATABASE_URL); .gitignore: .env ignoré, !.env.example versionné
+[x] 8bis.3  README (anglais): overview, architecture, getting started (docker compose up + migrate + tests)
+[x] 8bis.4  Rejouer le test 8.6 contre le Postgres dockerisé -> 5 passed sur :5433 (parité dev/prod OK)
+            + sqlx migrate run sur la base du conteneur -> 4 tables créées (migration valide de zéro)
 [ ] 8bis.5  (plus tard) dockeriser l'API Rust + l'indexer; prod -> Postgres managé (Supabase/Neon/RDS)
 
 

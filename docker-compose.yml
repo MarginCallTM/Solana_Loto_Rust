@@ -1,0 +1,27 @@
+# docker-compose.yml — local dev services for the Solana lottery project.
+# Usage:
+#   docker compose up -d     start in the background
+#   docker compose ps        check status / health
+#   docker compose down      stop & remove containers (data survives in the volume)
+
+services:
+  postgres:
+    image: postgres:16                      # official Postgres 16 image (Docker Hub)
+    container_name: lottery_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"             # host:container — host 5433 (native PG owns 5432)
+    volumes:
+      - lottery_pgdata:/var/lib/postgresql/data   # named volume = data persists
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  lottery_pgdata:
