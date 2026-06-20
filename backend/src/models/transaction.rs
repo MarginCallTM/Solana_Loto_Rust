@@ -6,10 +6,10 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Deserialize, Serialize, sqlx::Type)]
 #[sqlx(type_name = "VARCHAR", rename_all = "snake_case")]
 pub enum TransactionType {
+    InitializeLottery,
     BuyTicket,
     DrawWinner,
-    ClaimPrize,
-    CreateLottery,
+    Payout,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, sqlx::Type)]

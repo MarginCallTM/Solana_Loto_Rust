@@ -1,140 +1,134 @@
--- Enable UUID extension
+-- Enable UUID extension (gen_random_uuid is also available natively, but we keep uuid-ossp for clarity)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- USERS TABLE
-
+-- =====================================================================
+-- USERS — pure OFF-CHAIN enrichment (wallet -> username).
+-- The chain has no notion of "user": it only knows pubkeys.
+-- This table NEVER holds critical logic; it only decorates pubkeys.
+-- =====================================================================
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    wallet_address VARCHAR(44) UNIQUE NOT NULL, -- Solana wallet (base58)
+    wallet_address VARCHAR(44) UNIQUE NOT NULL, -- Solana pubkey (base58, <= 44 chars)
     username VARCHAR(50),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- INDEX FOR FAST WALLET LOOKUPS
 CREATE INDEX idx_users_wallet ON users(wallet_address);
 
-
--- LOTTERY TABLE
-
+-- =====================================================================
+-- LOTTERIES — mirror of the on-chain `Lottery` PDA (cache).
+-- Natural key = round_id (the value present in EVERY on-chain event).
+-- =====================================================================
 CREATE TABLE lotteries (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
-    -- SOLANA BLOCKCHAIN REFERENCE
-    program_account VARCHAR(44) NOT NULL, -- On-Chain Lottery account
+    -- On-chain identity (the indexer upserts ON CONFLICT (round_id)).
+    round_id BIGINT NOT NULL UNIQUE,            -- u64 logical key, derived from seeds ["lottery", round_id]
+    lottery_account VARCHAR(44) NOT NULL UNIQUE, -- the Lottery PDA address (base58)
 
-    -- Lottery configuration
-    ticket_price BIGINT NOT NULL, -- Price in lamports (1 SOL = 1 000 000 000 lamports)
-    end_time TIMESTAMPTZ NOT NULL, -- When lottery closes
+    -- Authority allowed to draw_winner (on-chain pubkey, source of truth).
+    authority VARCHAR(44) NOT NULL,
 
-    -- Current state
-    total_tickets INTEGER NOT NULL DEFAULT 0,
-    prize_pool BIGINT NOT NULL DEFAULT 0, -- Total SOL collected
+    -- Configuration (lamports; 1 SOL = 1e9 lamports).
+    ticket_price BIGINT NOT NULL,               -- u64
+    end_time TIMESTAMPTZ NOT NULL,              -- indexer converts end_timestamp (unix i64) -> tz
 
-    -- Winner information
-    winning_ticket_number INTEGER,
-    winner_id UUID REFERENCES users(id),
+    -- Mutable state mirrored from chain.
+    total_tickets BIGINT NOT NULL DEFAULT 0,    -- u64 (was INTEGER: overflow-unsafe)
+    pot_amount BIGINT NOT NULL DEFAULT 0,       -- u64 (renamed from prize_pool to match on-chain)
+    state VARCHAR(10) NOT NULL DEFAULT 'Open',  -- mirrors LotteryState enum
+    claimed BOOLEAN NOT NULL DEFAULT FALSE,     -- prize paid out?
 
-    -- Status
-    is_finalized BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Winner (filled when WinnerDrawn / PrizeClaimed are indexed).
+    winner_index BIGINT,                        -- Option<u64> -> NULL until drawn
+    winner_address VARCHAR(44),                 -- resolved pubkey of the winning ticket buyer
+    winner_id UUID REFERENCES users(id),        -- optional enrichment (NOT a source of truth)
 
-    -- Metadate
-    created_by UUID REFERENCES users(id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Bookkeeping.
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- row insertion time (NOT on-chain time)
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    -- Constraints
+    -- Constraints = ON-CHAIN invariants only (safe to mirror; the program enforces them).
+    -- NOTE: we deliberately DROP the old `end_time > created_at` check:
+    --       it tied on-chain time to wall-clock and broke history replay.
     CHECK (ticket_price > 0),
     CHECK (total_tickets >= 0),
-    CHECK (prize_pool >= 0),
-    CHECK (end_time > created_at)
+    CHECK (pot_amount >= 0),
+    CHECK (state IN ('Open', 'Drawing', 'Closed'))
 );
 
-
--- INDEXES FOR COMMON QUERIES
+CREATE INDEX idx_lotteries_state ON lotteries(state);
 CREATE INDEX idx_lotteries_end_time ON lotteries(end_time);
-CREATE INDEX idx_lotteries_is_finalized ON lotteries(is_finalized);
-CREATE INDEX idx_lotteries_created_by ON lotteries(created_by);
+CREATE INDEX idx_lotteries_authority ON lotteries(authority);
 
-
--- TICKETS TABLE
-
+-- =====================================================================
+-- TICKETS — mirror of each on-chain `Ticket` PDA.
+-- On-chain identity = (round_id, index). We key on (lottery_id, ticket_index).
+-- =====================================================================
 CREATE TABLE tickets (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
-    -- References
     lottery_id UUID NOT NULL REFERENCES lotteries(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id),
 
-    -- Ticket information
-    ticket_number INTEGER NOT NULL,
+    -- On-chain ticket data.
+    ticket_index BIGINT NOT NULL,               -- u64 `index` field (was ticket_number INTEGER)
+    buyer_address VARCHAR(44) NOT NULL,         -- buyer pubkey = SOURCE OF TRUTH
+    user_id UUID REFERENCES users(id),          -- optional enrichment (nullable on purpose)
 
-    -- Blockchain proof
-    transaction_signature VARCHAR(88) NOT NULL, -- Solana transaction signature
+    -- Blockchain proof.
+    transaction_signature VARCHAR(88) NOT NULL, -- base58 signature (<= 88 chars)
 
-    -- Metadata
     purchased_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    -- Constraints
-    UNIQUE(lottery_id, ticket_number), -- Each lottery has unique ticket numbers
-    CHECK (ticket_number >= 0)
+    -- Idempotency anchor for the indexer: a ticket index is unique within a round.
+    UNIQUE (lottery_id, ticket_index),
+    CHECK (ticket_index >= 0)
 );
 
--- INDEXES FOR FAST LOOKUPS
 CREATE INDEX idx_tickets_lottery ON tickets(lottery_id);
-CREATE INDEX idx_tickets_user ON tickets(user_id);
-CREATE INDEX idx_tickets_transaction ON tickets(transaction_signature);
+CREATE INDEX idx_tickets_buyer ON tickets(buyer_address);
+CREATE INDEX idx_tickets_signature ON tickets(transaction_signature);
 
-
--- TRANSACTION TABLE (Audit Trail)
-
+-- =====================================================================
+-- TRANSACTIONS — audit trail of indexed instructions.
+-- signature UNIQUE = the idempotency anchor (replaying an event is a no-op).
+-- =====================================================================
 CREATE TABLE transactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
-    -- Blockchain reference
     signature VARCHAR(88) UNIQUE NOT NULL,
 
-    -- Related entities
     lottery_id UUID REFERENCES lotteries(id),
     user_id UUID REFERENCES users(id),
 
-    -- Transaction type
-    tx_type VARCHAR(20) NOT NULL, -- 'buy_ticket', 'draw_winner', 'claim_prize', 'create_lottery'
+    tx_type VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL,
 
-    -- Status Tracking
-    status VARCHAR(20) NOT NULL, --'pending', 'confirmed', 'failed'
-
-    -- Metadata
     processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    -- Contraints
-    CHECK (tx_type IN ('buy_ticket', 'draw_winner', 'claim_prize', 'create_lottery')),
+    -- tx_type values = the ACTUAL on-chain instruction names.
+    CHECK (tx_type IN ('initialize_lottery', 'buy_ticket', 'draw_winner', 'payout')),
     CHECK (status IN ('pending', 'confirmed', 'failed'))
 );
 
--- INDEXES FOR MONITORING
-CREATE INDEX idx_transactions_signature ON transactions(signature);
 CREATE INDEX idx_transactions_lottery ON transactions(lottery_id);
 CREATE INDEX idx_transactions_status ON transactions(status);
 CREATE INDEX idx_transactions_processed_at ON transactions(processed_at);
 
-
--- UPDATED_AT TRIGGER FUNCTION
+-- =====================================================================
+-- updated_at auto-touch trigger (mutable tables only).
+-- =====================================================================
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE 'plpgsql';
 
--- Apply trigger to tables
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_lotteries_updated_at BEFORE UPDATE ON lotteries
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-
-
-

@@ -14,23 +14,23 @@ impl TicketRepository {
     pub async fn create(&self, create_ticket: CreateTicket) -> anyhow::Result<Ticket> {
         let ticket = sqlx::query_as::<_, Ticket> (
             r#"
-            INSERT INTO tickets (lottery_id, user_id, ticket_number, transaction_signature)
+            INSERT INTO tickets (lottery_id, ticket_index, buyer_address, transaction_signature)
             VALUES ($1, $2, $3, $4)
             RETURNING *
             "#,
         )
         .bind(create_ticket.lottery_id)
-        .bind(create_ticket.user_id)
-        .bind(create_ticket.ticket_number)
+        .bind(create_ticket.ticket_index)
+        .bind(create_ticket.buyer_address)
         .bind(&create_ticket.transaction_signature)
         .fetch_one(&self.pool)
         .await?;
 
         tracing::info!(
-            "Created ticker #{} for lottery {} (user: {})",
-            ticket.ticket_number,
+            "Created ticket #{} for lottery {} (buyer: {})",
+            ticket.ticket_index,
             ticket.lottery_id,
-            ticket.user_id
+            ticket.buyer_address
         );
 
         Ok(ticket)
@@ -41,7 +41,7 @@ impl TicketRepository {
             r#"
             SELECT * FROM tickets
             WHERE lottery_id = $1
-            ORDER BY ticket_number ASC
+            ORDER BY ticket_index ASC
             "#,
         )
         .bind(lottery_id)
@@ -56,13 +56,13 @@ impl TicketRepository {
             r#"
             SELECT
                 t.id as ticket_id,
-                t.ticket_number,
+                t.ticket_index,
                 t.transaction_signature,
                 t.purchased_at,
                 l.id as lottery_id,
                 l.ticket_price,
                 l.end_time,
-                l.is_finalized
+                l.state
             FROM tickets t
             JOIN lotteries l ON t.lottery_id = l.id
             WHERE t.user_id = $1

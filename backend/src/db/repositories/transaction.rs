@@ -1,6 +1,5 @@
-use crate::models::{CreateTransaction, Transaction};
+use crate::models::{CreateTransaction, Transaction, TransactionType};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 pub struct TransactionRepository {
     pool: PgPool,
@@ -13,10 +12,10 @@ impl TransactionRepository {
 
     pub async fn create(&self, create_tx: CreateTransaction) -> anyhow::Result<Transaction> {
         let tx_type_str = match create_tx.tx_type {
-            crate::models::TransactionType::BuyTicket => "buy_ticket",
-            crate::models::TransactionType::DrawWinner => "draw_winner",
-            crate::models::TransactionType::ClaimPrize => "claim_prize",
-            crate::models::TransactionType::CreateLottery => "create_lottery",
+            TransactionType::InitializeLottery => "initialize_lottery",
+            TransactionType::BuyTicket => "buy_ticket",
+            TransactionType::DrawWinner => "draw_winner",
+            TransactionType::Payout => "payout",
         };
 
         let transaction = sqlx::query_as::<_, Transaction>(
@@ -51,7 +50,7 @@ impl TransactionRepository {
     }
 
     pub async fn find_by_signature(&self, signature: &str) -> anyhow::Result<Option<Transaction>> {
-        let transaction = sqlx::query_as::<_, Transaction> (
+        let transaction = sqlx::query_as::<_, Transaction>(
             r#"
             SELECT * FROM transactions WHERE signature = $1
             "#,
