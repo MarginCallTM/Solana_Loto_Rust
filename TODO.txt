@@ -212,17 +212,39 @@ PHASE 8bis — OUTILLAGE / DOCKER (reproductibilité dev, valeur portfolio)
 
 
 --------------------------------------------------------------
-PHASE 9 — RÉCONCILIATION BACKEND -> MODÈLE INDEXER/EVENTS (D9bis)
+PHASE 9 — INDEXER : events on-chain -> cache DB (en RUST) (D9bis)
 --------------------------------------------------------------
-[ ] 9.1  Backend Rust/Axum existant : compléter les handlers d'API vides
-[ ] 9.2  Ajouter un composant indexer qui se connecte au RPC devnet
-[ ] 9.3  S'abonner aux logs/events du programme via l'IDL
-[ ] 9.4  Parser TicketBought / WinnerDrawn / PrizeClaimed
-[ ] 9.5  Remplacer les écritures DB directes par des upserts pilotés par events
-         (idempotents, basés sur transaction_signature)
-[ ] 9.6  Gérer reconnexion RPC + reprise (depuis dernier slot traité)
-[ ] 9.7  Garder l'API REST en LECTURE seule pour le frontend (historique/stats)
-[ ] 9.8  Test : rejouer des events -> état DB cohérent avec on-chain
+  Décisions verrouillées:
+   - Indexer ecrit en RUST (reutilise models/ + repositories deja testes).
+   - Scaffold mort api/ + utils/ SUPPRIME (non compile, non teste); l'API REST
+     lecture-seule pour le frontend est repoussee a une phase ulterieure (cf 9.7).
+   - Principe D9: l'indexer RECOPIE ce que la chaine a tranche, il ne CALCULE jamais
+     (pas de choix de gagnant ni de calcul de pot cote indexer).
+[x] 9.1  Curseur de reprise: table indexer_state (migration DEDIEE 20260623…),
+         model IndexerState + IndexerStateRepository (get / save_cursor en UPSERT),
+         test round-trip INSERT + UPDATE (ON CONFLICT)  -> 6 tests passing
+         -> lecon migrations: une migration appliquee est IMMUABLE; tout changement
+            = nouveau fichier (sqlx migrate add). reset = dev only (cache D9).
+[x] 9.2  Squelette du binaire indexer (src/bin/indexer.rs) + connexion RPC devnet
+         (charge la config, ouvre le pool DB, lit le curseur, log, ne crashe pas)
+         -> FAIT: extraction d'une bibliotheque src/lib.rs (pub mod db; pub mod models;)
+            partagee par les 2 binaires; main.rs (API) + src/bin/indexer.rs (indexer) la consomment
+            via `use lottery_api::...` (lib/bin pattern: un bin ne peut pas voir le code d'un autre).
+         -> config via .env (DATABASE_URL, SOLANA_RPC_URL=devnet, PROGRAM_ID=DD5CP...).
+         -> RPC async: solana_client::nonblocking::rpc_client::RpcClient (v2.3.13, API verifiee).
+            get_version()/get_slot() confirment la connexion; lit le curseur via IndexerStateRepository::get.
+         -> smoke run OK: connecte a devnet, "No cursor yet" (table vide), exit propre.
+         -> NB dette: warning future-incompat sqlx-postgres 0.7.4 (dans la dep, pas notre code) -> upgrade 0.8 plus tard.
+[ ] 9.3  Recuperation des signatures du programme + decodage des events Anchor
+         (discriminators 8 octets) via l'IDL ; valider owner/longueur (donnee non fiable)
+[ ] 9.4  Dispatch idempotent vers repositories (LotteryInitialized / TicketBought /
+         WinnerDrawn / PrizeClaimed), ancre sur UNIQUE (signature, (lottery_id, ticket_index))
+[ ] 9.5  Boucle de polling + avancement du curseur (traiter -> upsert -> save_cursor)
+         + retries / reprise RPC (reconnexion, dernier slot/signature traite)
+[ ] 9.6  Test e2e: rejouer une sequence d'events depuis zero -> etat DB deterministe
+         (validation concrete de la reconstructibilite D9)
+[ ] 9.7  (plus tard) API REST en LECTURE seule pour le frontend (historique/stats),
+         reecrite proprement par-dessus models/repositories (l'ancien scaffold est supprime)
 
 
 --------------------------------------------------------------

@@ -1,6 +1,4 @@
- // mod config; Added this after
-mod db;
-mod models;
+use lottery_api::db;
 
 use axum::{routing::get, Router};
 use std::net::SocketAddr;
