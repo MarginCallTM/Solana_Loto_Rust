@@ -132,3 +132,4 @@ CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
 
 CREATE TRIGGER update_lotteries_updated_at BEFORE UPDATE ON lotteries
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+

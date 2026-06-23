@@ -1,4 +1,4 @@
-use crate::db::repositories::{LotteryRepository, TicketRepository, TransactionRepository};
+use crate::db::repositories::{IndexerStateRepository, LotteryRepository, TicketRepository, TransactionRepository};
 use crate::models::{CreateLottery, CreateTicket, CreateTransaction, TransactionType};
 use chrono::{Duration, Utc};
 use sqlx::PgPool;
@@ -114,4 +114,27 @@ async fn transaction_insert_matches_check(pool: PgPool) {
 
     assert_eq!(tx.tx_type, "initialize_lottery"); // would violate the CHECK if mismapped
     assert_eq!(tx.status, "pending");
+}
+
+// 6. The resume cursor round-trips: INSERT path then UPDATE (ON CONFLICT) path.
+#[sqlx::test]
+async fn indexer_cursor_round_trip(pool: PgPool) {
+    let repo = IndexerStateRepository::new(pool);
+    let id = "lottery-devnet";
+
+    // Never ran yet -> no cursor stored.
+    let initial = repo.get(id).await.unwrap();
+    assert!(initial.is_none());
+
+    // First save takes the INSERT branch.
+    repo.save_cursor(id, "sig_one", 100).await.unwrap();
+    let after_first = repo.get(id).await.unwrap().unwrap();
+    assert_eq!(after_first.last_signature.as_deref(), Some("sig_one"));
+    assert_eq!(after_first.last_slot, Some(100));
+
+    // Advancing takes the UPDATES (ON CONFLICT) branch: same id, new values.
+    repo.save_cursor(id, "sig_two", 250).await.unwrap();
+    let after_second = repo.get(id).await.unwrap().unwrap();
+    assert_eq!(after_second.last_signature.as_deref(), Some("sig_two"));
+    assert_eq!(after_second.last_slot, Some(250));
 }
