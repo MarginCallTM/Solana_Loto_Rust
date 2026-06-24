@@ -235,7 +235,7 @@ PHASE 9 — INDEXER : events on-chain -> cache DB (en RUST) (D9bis)
             get_version()/get_slot() confirment la connexion; lit le curseur via IndexerStateRepository::get.
          -> smoke run OK: connecte a devnet, "No cursor yet" (table vide), exit propre.
          -> NB dette: warning future-incompat sqlx-postgres 0.7.4 (dans la dep, pas notre code) -> upgrade 0.8 plus tard.
-[~] 9.3  Recuperation des signatures du programme + decodage des events Anchor
+[x] 9.3  Recuperation des signatures du programme + decodage des events Anchor
          (discriminators 8 octets) via l'IDL ; valider owner/longueur (donnee non fiable)
          -- PARTIE 1 (DECODAGE) = FAIT le 2026-06-23 --
          -> nouveau module lib::indexer (src/indexer/mod.rs + src/indexer/events.rs),
@@ -256,7 +256,7 @@ PHASE 9 — INDEXER : events on-chain -> cache DB (en RUST) (D9bis)
             solana-transaction-status-client-types 2.3.13 (PAS le crate complet solana-transaction-status,
             absent de l'arbre -> on prend la version client-types EXACTE = celle de solana-client, anti-conflit de types).
          -> cargo build -p lottery-api OK.
-         -- PARTIE 2 (FETCH RPC) = A FAIRE (reprise ici) --
+         -- PARTIE 2 (FETCH RPC) = FAIT le 2026-06-24 --
          -> PREREQUIS FAIT (2026-06-24): devnet contient desormais de VRAIES tx applicatives
             a indexer (avant: seul le ping de 7.7). Scripts de seed crees:
             - scripts/seed-devnet.ts : 1 cycle complet init+buy x2+draw+payout = les 4 events.
@@ -266,23 +266,50 @@ PHASE 9 — INDEXER : events on-chain -> cache DB (en RUST) (D9bis)
               le ticket est seede par lottery.total_tickets, pas par buyer).
             Bonus: 1er test E2E reel du programme sur devnet (init->buy->draw->payout) -> OK.
             Lancer: yarn run ts-mocha -p ./tsconfig.json -t 1000000 "scripts/seed-devnet*.ts".
-         [ ] get_signatures_for_address_with_config(program_id, {before, until, limit:1000, commitment})
+         [x] get_signatures_for_address_with_config(program_id, {limit:1000, commitment, ..Default})
              -> page de signatures (du + recent au + ancien).
-         [ ] pour chaque sig: get_transaction_with_config(sig, {encoding: Json,
+         [x] pour chaque sig: get_transaction_with_config(sig, {encoding: Json,
              max_supported_transaction_version: Some(0), commitment: confirmed}).
-         [ ] SAUTER si meta.err.is_some() (tx echouee = effets annules on-chain).
-             sinon extraire meta.log_messages (type OptionSerializer) -> decode_program_events(&logs, PROGRAM_ID).
-         [ ] pour 9.3: juste LOGGER les events decodes (dispatch DB = 9.4, boucle+curseur = 9.5).
-         -> chemins d'import a CONFIRMER au compilateur (solana_transaction_status_client_types::...,
-            OptionSerializer) plutot que de les deviner. Pattern de ref: indexer Raydium CLMM (via Solana MCP).
-[ ] 9.4  Dispatch idempotent vers repositories (LotteryInitialized / TicketBought /
+         [x] SAUTER si meta.err.is_some() (tx echouee = effets annules on-chain).
+             extraire meta.log_messages (OptionSerializer -> Option::from) -> decode_program_events(&logs, &program_id_str).
+         [x] pour 9.3: juste LOGGER les events decodes (dispatch DB = 9.4, boucle+curseur = 9.5).
+         -> chemins d'import CONFIRMES contre la source des crates 2.3.13 (pas de devinette):
+            GetConfirmedSignaturesForAddress2Config = solana_client::rpc_client (derive Default),
+            RpcTransactionConfig = solana_client::rpc_config (derive Copy), UiTransactionEncoding =
+            solana_transaction_status_client_types, CommitmentConfig/Signature = solana_sdk.
+            OptionSerializer<T> -> Option<T> via impl From (Option::from, pas d'import du type).
+         -> RESULTAT (cargo run --bin indexer sur devnet): 33 signatures, les 4 events decodes
+            sur tous les rounds de seed. Coherence VALIDEE: WinnerDrawn.winner_index -> buyer du
+            ticket de cet index == PrizeClaimed.winner, et amount == nb_tickets * ticket_price.
+            Garde-fou OWNER confirme en reel: ping (7.7) + tx de deploiement = 0 event (ignores).
+         -> A FAIRE en 9.5 (note): traiter ancien->recent (page.rev()) pour une reconstruction propre.
+[x] 9.4  Dispatch idempotent vers repositories (LotteryInitialized / TicketBought /
          WinnerDrawn / PrizeClaimed), ancre sur UNIQUE (signature, (lottery_id, ticket_index))
+         -> FAIT le 2026-06-24. Methodes idempotentes ajoutees aux repos (ON CONFLICT DO NOTHING;
+            total_tickets/pot_amount RECALCULES via COUNT, jamais incrementes -> rejouable).
+            Nouveau module lib::indexer::dispatch (dispatch_event): aiguille chaque LotteryEvent
+            vers les repos; derive le PDA lottery_account depuis round_id, pubkeys -> base58,
+            end_timestamp i64 -> TIMESTAMPTZ. winner_address rempli au PrizeClaimed (cf limites).
+            Binaire: traite ancien->recent (.iter().rev()) pour respecter l'ordre des FK.
+         -> VALIDE en DB (devnet): 4 rounds, 19 buy_ticket, total_tickets/pot/winner coherents.
+            Idempotence confirmee: relancer l'indexer ne double-compte pas.
 [ ] 9.5  Boucle de polling + avancement du curseur (traiter -> upsert -> save_cursor)
          + retries / reprise RPC (reconnexion, dernier slot/signature traite)
 [ ] 9.6  Test e2e: rejouer une sequence d'events depuis zero -> etat DB deterministe
          (validation concrete de la reconstructibilite D9)
 [ ] 9.7  (plus tard) API REST en LECTURE seule pour le frontend (historique/stats),
          reecrite proprement par-dessus models/repositories (l'ancien scaffold est supprime)
+
+  LIMITES CONNUES DE L'INDEXER (assumees, a garder en tete pour l'exactitude):
+   - winner_address rempli SEULEMENT au PrizeClaimed (choix de design). Entre draw_winner
+     et payout, winner_index est connu mais winner_address = NULL. Si le front doit afficher
+     le gagnant AVANT le claim -> resoudre winner_index -> buyer du ticket (JOIN sur tickets).
+   - emit! Anchor passe par les logs (sol_log_data) -> certains RPC publics TRONQUENT les logs
+     sous charge => event potentiellement manque. Parade robuste = emit_cpi! (CPI non tronquable),
+     en backlog PHASE 2. Sur devnet public: fiabilite "best effort".
+   - Niveau d'engagement = 'confirmed' (rapide). Une tx confirmee mais NON finalisee pourrait
+     theoriquement disparaitre sur un fork => on aurait indexe un truc annule. Exactitude max =
+     'finalized' (plus lent). Trade-off acceptable en devnet pedagogique; a revoir avant prod.
 
 
 --------------------------------------------------------------

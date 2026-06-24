@@ -61,4 +61,36 @@ impl TransactionRepository {
 
         Ok(transaction)
     }
+
+    /// Idempotent audit-trail insert. The indexer only sees confirmed txs
+    /// (failed ones are skipped upstream), so status is 'confirmed'. Resolves
+    /// lottery_id from round_id; no-ops on an already-seen signature.
+    pub async fn upsert(
+        &self,
+        signature: &str,
+        round_id: i64,
+        tx_type: TransactionType,
+    ) -> anyhow::Result<()> {
+        let tx_type_str = match tx_type {
+            TransactionType::InitializeLottery => "initialize_lottery",
+            TransactionType::BuyTicket => "buy_ticket",
+            TransactionType::DrawWinner => "draw_winner",
+            TransactionType::Payout => "payout",
+        };
+        sqlx::query(
+            r#"
+            INSERT INTO transactions (signature, lottery_id, tx_type, status)
+            SELECT $1, l.id, $3, 'confirmed'
+            FROM lotteries l
+            WHERE l.round_id = $2
+            ON CONFLICT (signature) DO NOTHING
+            "#,
+        )
+        .bind(signature)
+        .bind(round_id)
+        .bind(tx_type_str)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }

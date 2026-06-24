@@ -88,4 +88,31 @@ impl TicketRepository {
 
         Ok(count.0)
     }
+
+    /// Idempotent insert from a TicketBought event. Resolves the lottery FK from
+    /// round_id via a sub-select, and no-ops if this (round, index) already exists.
+    pub async fn upsert_for_round(
+        &self,
+        round_id: i64,
+        ticket_index: i64,
+        buyer_address: &str,
+        signature: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO tickets (lottery_id, ticket_index, buyer_address, transaction_signature)
+            SELECT l.id, $2, $3, $4
+            FROM lotteries l
+            WHERE l.round_id = $1
+            ON CONFLICT (lottery_id, ticket_index) DO NOTHING
+            "#,
+        )
+        .bind(round_id)
+        .bind(ticket_index)
+        .bind(buyer_address)
+        .bind(signature)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
