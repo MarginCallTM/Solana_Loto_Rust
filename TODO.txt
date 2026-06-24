@@ -235,8 +235,46 @@ PHASE 9 — INDEXER : events on-chain -> cache DB (en RUST) (D9bis)
             get_version()/get_slot() confirment la connexion; lit le curseur via IndexerStateRepository::get.
          -> smoke run OK: connecte a devnet, "No cursor yet" (table vide), exit propre.
          -> NB dette: warning future-incompat sqlx-postgres 0.7.4 (dans la dep, pas notre code) -> upgrade 0.8 plus tard.
-[ ] 9.3  Recuperation des signatures du programme + decodage des events Anchor
+[~] 9.3  Recuperation des signatures du programme + decodage des events Anchor
          (discriminators 8 octets) via l'IDL ; valider owner/longueur (donnee non fiable)
+         -- PARTIE 1 (DECODAGE) = FAIT le 2026-06-23 --
+         -> nouveau module lib::indexer (src/indexer/mod.rs + src/indexer/events.rs),
+            declare dans src/lib.rs (pub mod indexer;). Pattern: logique PURE et TESTABLE
+            dans la lib, le binaire src/bin/indexer.rs la consommera.
+         -> events.rs: 4 structs Borsh (LotteryInitialized/TicketBought/WinnerDrawn/PrizeClaimed)
+            qui MIRROIRENT les #[event] on-chain (ordre des champs IDENTIQUE = obligatoire Borsh).
+            Pubkey gardee en [u8;32] brut (decouple de anchor-lang/solana-sdk; -> base58 en 9.4).
+         -> discriminateurs (8 octets) RECOPIES de target/idl/lottery.json (= sha256("event:<Nom>")[..8]).
+         -> decode_program_events(logs, program_id): suit la pile invoke/success des logs et ne
+            decode "Program data: <b64>" QUE si NOTRE programme est au sommet (garde-fou OWNER, CPI-safe).
+            + garde longueur (>=8) + try_from_slice (refuse octets en trop) + jamais de panic (skip).
+         -> emit! Anchor -> sol_log_data -> ligne "Program data: <base64>" = [disc 8o ++ champs Borsh].
+            (NB: emit! peut etre tronque par certains RPC sous charge; emit_cpi! = piste phase 2.)
+         -> 2 tests unitaires PURS (sans RPC/DB) PASSENT: cas nominal + cas securite (event d'un
+            AUTRE programme ignore). Lancer: `cargo test -p lottery-api events`.
+         -> deps ajoutees dans backend/Cargo.toml: borsh 1 (derive), base64 0.22,
+            solana-transaction-status-client-types 2.3.13 (PAS le crate complet solana-transaction-status,
+            absent de l'arbre -> on prend la version client-types EXACTE = celle de solana-client, anti-conflit de types).
+         -> cargo build -p lottery-api OK.
+         -- PARTIE 2 (FETCH RPC) = A FAIRE (reprise ici) --
+         -> PREREQUIS FAIT (2026-06-24): devnet contient desormais de VRAIES tx applicatives
+            a indexer (avant: seul le ping de 7.7). Scripts de seed crees:
+            - scripts/seed-devnet.ts : 1 cycle complet init+buy x2+draw+payout = les 4 events.
+            - scripts/seed-devnet-multi.ts : 5 acheteurs DISTINCTS finances par transfert depuis
+              le wallet principal (pas d'airdrop, fiable); 2 d'entre eux achetent 2 tickets
+              -> 7 tickets, valide EN PRATIQUE le modele d'index GLOBAL du Ticket PDA (cf D21bis:
+              le ticket est seede par lottery.total_tickets, pas par buyer).
+            Bonus: 1er test E2E reel du programme sur devnet (init->buy->draw->payout) -> OK.
+            Lancer: yarn run ts-mocha -p ./tsconfig.json -t 1000000 "scripts/seed-devnet*.ts".
+         [ ] get_signatures_for_address_with_config(program_id, {before, until, limit:1000, commitment})
+             -> page de signatures (du + recent au + ancien).
+         [ ] pour chaque sig: get_transaction_with_config(sig, {encoding: Json,
+             max_supported_transaction_version: Some(0), commitment: confirmed}).
+         [ ] SAUTER si meta.err.is_some() (tx echouee = effets annules on-chain).
+             sinon extraire meta.log_messages (type OptionSerializer) -> decode_program_events(&logs, PROGRAM_ID).
+         [ ] pour 9.3: juste LOGGER les events decodes (dispatch DB = 9.4, boucle+curseur = 9.5).
+         -> chemins d'import a CONFIRMER au compilateur (solana_transaction_status_client_types::...,
+            OptionSerializer) plutot que de les deviner. Pattern de ref: indexer Raydium CLMM (via Solana MCP).
 [ ] 9.4  Dispatch idempotent vers repositories (LotteryInitialized / TicketBought /
          WinnerDrawn / PrizeClaimed), ancre sur UNIQUE (signature, (lottery_id, ticket_index))
 [ ] 9.5  Boucle de polling + avancement du curseur (traiter -> upsert -> save_cursor)
