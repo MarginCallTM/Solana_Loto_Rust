@@ -61,48 +61,101 @@ async fn main() -> anyhow::Result<()> {
         ),
     }
 
-    // --- 9.3 part 2: fetch recent program transactions decode their events.
-    //          One page only here; pagination + cursor-driven `until` come in 9.5 ---
-    let sig_config = GetConfirmedSignaturesForAddress2Config {
-        limit: Some(1000),
-        commitment: Some(CommitmentConfig::confirmed()),
-        ..Default::default()
-    };
-    let signatures = rpc
-        .get_signatures_for_address_with_config(&program_id, sig_config)
-        .await?;
-    tracing::info!("Fetched {} signature(s) for the program", signatures.len());
+    // 9.5: poll forever. Each cycle indexes everything new since the cursor,
+    //      then sleeps. A failed cycle is logged and retried on the next tick
+    //      (the cursor only advances after a batch is fully processed) ---
+    let poll_secs: u64 = std::env::var("POLL_INTERVAL_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    tracing::info!("Polling every {poll_secs}s (Ctrl+C to stop)");
 
-    // RpcTransactionConfig is Copy, so the same value is reused every iteration.
+    loop {
+        match run_cycle(&rpc, &pool, &program_id, &program_id_str, &cursor_repo).await {
+            Ok(0) => tracing::debug!("No new events"),
+            Ok(n) => tracing::info!("Indexed {n} event(s)"),
+            Err(e) => tracing::error!("Cycle failed (will retry next tick): {e:#}"),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(poll_secs)).await;
+    }
+}
+
+// One indexing cycle: fetch every signature newer than the saved cursor
+// (paging backwards with `before`), dispatch each event oldest -> newest,
+// then advance the cursor. Returns how many events were dispatched.
+async fn run_cycle(
+    rpc: &RpcClient,
+    pool: &sqlx::PgPool,
+    program_id: &Pubkey,
+    program_id_str: &str,
+    cursor_repo: &IndexerStateRepository,
+) -> anyhow::Result<usize> {  
+    // 1. Where did we stop? None on the first run => full backfill.
+    let until = cursor_repo.get(CURSOR_ID).await?.and_then(|s| s.last_signature);
+    let until_sig = match &until {
+        Some(s) => Some(Signature::from_str(s)?),
+        None => None,
+    };
+
+    // 2. Collect ALL new signatures since the cursor (newest -> oldest),
+    //    paging backwards 1000 at a time with `before`.
+    let mut new_sigs = Vec::new();
+    let mut before: Option<Signature> = None;
+    loop {
+        let config = GetConfirmedSignaturesForAddress2Config {
+            before,
+            until: until_sig,
+            limit: Some(1000),
+            commitment: Some(CommitmentConfig::confirmed()),
+        };
+        let page = rpc
+            .get_signatures_for_address_with_config(program_id, config)
+            .await?;
+        let Some(oldest) = page.last() else { break };
+        before = Some(Signature::from_str(&oldest.signature)?);
+        let full_page = page.len() == 1000;
+        new_sigs.extend(page);
+        if !full_page {
+            break;
+        }
+    }
+
+    if new_sigs.is_empty() {
+        return Ok(0);
+    }
+
+    // 3. The new cursor is the newest signature of this batch (first element).
+    let new_cursor_sig = new_sigs[0].signature.clone();
+    let new_cursor_slot = new_sigs[0].slot as i64;
+
+    // 4. Process oldest -> newest so FK order holds, dispatching each event.
     let tx_config = RpcTransactionConfig {
         encoding: Some(UiTransactionEncoding::Json),
         commitment: Some(CommitmentConfig::confirmed()),
         max_supported_transaction_version: Some(0),
     };
-
-    // Process oldest -> newest so a round's Initialized row exists before its
-    // TicketBought / WinnerDrawn / PrizeClaimed rows reference it (FK order).
-    for status in signatures.iter().rev() {
-        // Skip failed transactions: their on-chain effects were reverted.
+    let mut processed = 0usize;
+    for status in new_sigs.iter().rev() {
         if status.err.is_some() {
             continue;
         }
-
         let signature = Signature::from_str(&status.signature)?;
         let tx = rpc.get_transaction_with_config(&signature, tx_config).await?;
-
-        // Logs live in the transaction meta; OptionSerializer -> plain Option.
         let logs: Option<Vec<String>> = tx
             .transaction
             .meta
             .and_then(|meta| Option::from(meta.log_messages));
-        let Some(logs) = logs else {continue};
-
-        for event in decode_program_events(&logs, &program_id_str) {
-            tracing::info!("{} -> {:?}", status.signature, event);
-            dispatch_event(&pool, &program_id, &status.signature, &event).await?;
+        let Some(logs) = logs else { continue };
+        for event in decode_program_events(&logs, program_id_str) {
+            dispatch_event(pool, program_id, &status.signature, &event).await?;
+            processed += 1;
         }
     }
 
-    Ok(())
+    // 5. Advance the cursor ONLY after the batch is durably processed.
+    cursor_repo
+        .save_cursor(CURSOR_ID, &new_cursor_sig, new_cursor_slot)
+        .await?;
+
+    Ok(processed)
 }

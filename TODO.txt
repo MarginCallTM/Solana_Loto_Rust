@@ -293,8 +293,16 @@ PHASE 9 — INDEXER : events on-chain -> cache DB (en RUST) (D9bis)
             Binaire: traite ancien->recent (.iter().rev()) pour respecter l'ordre des FK.
          -> VALIDE en DB (devnet): 4 rounds, 19 buy_ticket, total_tickets/pot/winner coherents.
             Idempotence confirmee: relancer l'indexer ne double-compte pas.
-[ ] 9.5  Boucle de polling + avancement du curseur (traiter -> upsert -> save_cursor)
+[x] 9.5  Boucle de polling + avancement du curseur (traiter -> upsert -> save_cursor)
          + retries / reprise RPC (reconnexion, dernier slot/signature traite)
+         -> FAIT le 2026-06-25. Binaire = daemon: loop { run_cycle; sleep(POLL_INTERVAL_SECS=10) }.
+            run_cycle: lit le curseur -> fetch incremental (until=curseur) AVEC pagination
+            backwards (before = derniere sig de la page, boucle tant que page pleine=1000) ->
+            traite ancien->recent (dispatch) -> save_cursor EN DERNIER (apres batch durable).
+            Resilience: un cycle en erreur est LOGGE et retente au tick suivant (pas de crash);
+            curseur avance seulement apres succes -> reprise propre + idempotent (cf 9.4).
+         -> VALIDE en reel: 1er run "No cursor yet" -> backfill 31 events; seed lance a cote ->
+            "Indexed 5 event(s)" au tick suivant SANS re-telecharger les 31 (preuve du curseur).
 [ ] 9.6  Test e2e: rejouer une sequence d'events depuis zero -> etat DB deterministe
          (validation concrete de la reconstructibilite D9)
 [ ] 9.7  (plus tard) API REST en LECTURE seule pour le frontend (historique/stats),
