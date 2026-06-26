@@ -81,3 +81,109 @@ pub async fn dispatch_event(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::indexer::events::{
+        LotteryEvent, LotteryInitialized, PrizeClaimed, TicketBought, WinnerDrawn,
+    };
+    use crate::models::Lottery;
+
+    // A full round as the chain would emit it: init -> 3 buys -> draw -> payout.
+    // Each event is paired with the signature of the tx that emitted it.
+    fn sample_round() -> Vec<(&'static str, LotteryEvent)> {
+        vec![
+            (
+                "sig_init",
+                LotteryEvent::Initialized(LotteryInitialized {
+                    round_id: 1,
+                    authority: [1u8; 32],
+                    ticket_price: 100_000_000,
+                    end_timestamp: 1_700_000_000, 
+                }),
+            ),
+            (
+                "sig_buy0",
+                  LotteryEvent::TicketBought(TicketBought { round_id: 1, buyer: [10u8; 32], index: 0 }),
+            ),
+            (
+                "sig_buy1",
+                  LotteryEvent::TicketBought(TicketBought { round_id: 1, buyer: [11u8; 32], index: 1 }),
+            ),
+            (
+                "sig_buy2",
+                  LotteryEvent::TicketBought(TicketBought { round_id: 1, buyer: [12u8; 32], index: 2 }),
+            ),
+            (
+                "sig_draw",
+                  LotteryEvent::WinnerDrawn(WinnerDrawn { round_id: 1, winner_index: Some(1) }),
+            ),
+            (
+                "sig_payout",
+                  LotteryEvent::PrizeClaimed(PrizeClaimed {
+                      round_id: 1,
+                      winner: [11u8; 32],
+                      amount: 300_000_000,
+                  }),
+            ),
+        ]
+    }
+
+    async fn replay(pool: &PgPool, program_id: &Pubkey) {
+        for (sig, event) in sample_round() {
+            dispatch_event(pool, program_id, sig, &event).await.unwrap();
+        }
+    }
+
+    async fn count(pool: &PgPool, table: &str) -> i64 {
+        // `table` is always a hardcoded literalv at the call sites (never user input).
+        let (n,): (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        n
+    }
+
+    // Replaying a full round from an enmpty DB yields the exact mirrored state,
+    // and replaying it again changes nothing: idempotence = D9 reconstructibility.
+    #[sqlx::test]
+    async fn replay_is_deterministic_and_idempotent(pool: PgPool) {
+        let program_id = Pubkey::new_unique();
+
+        // --- First replay, from an empty DB ---
+        replay(&pool, &program_id).await;
+
+        let lottery = sqlx::query_as::<_, Lottery>("SELECT * FROM lotteries WHERE
+         round_id = $1")
+            .bind(1_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let expected_winner = Pubkey::new_from_array([11u8; 32]).to_string();
+        assert_eq!(lottery.total_tickets, 3);
+        assert_eq!(lottery.pot_amount, 300_000_000);
+        assert_eq!(lottery.state, "Closed");
+        assert_eq!(lottery.winner_index, Some(1));
+        assert_eq!(lottery.winner_address.as_deref(),
+    Some(expected_winner.as_str()));
+        assert!(lottery.claimed);
+        assert_eq!(count(&pool, "tickets").await, 3);
+        assert_eq!(count(&pool, "transactions").await, 6);
+
+        // --- Second replay of the SAME events: nothing must change ---
+        replay(&pool, &program_id).await;
+
+        let after = sqlx::query_as::<_, Lottery>("SELECT * FROM lotteries WHERE
+    round_id = $1")
+            .bind(1_i64)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(after.total_tickets, 3, "replay must not double-count tickets");
+        assert_eq!(after.pot_amount, 300_000_000);
+        assert_eq!(count(&pool, "tickets").await, 3, "replay must not duplicate tickets");
+        assert_eq!(count(&pool, "transactions").await, 6, "replay must not duplicate transactions");
+    }
+}

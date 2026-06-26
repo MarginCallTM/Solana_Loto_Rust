@@ -303,8 +303,15 @@ PHASE 9 — INDEXER : events on-chain -> cache DB (en RUST) (D9bis)
             curseur avance seulement apres succes -> reprise propre + idempotent (cf 9.4).
          -> VALIDE en reel: 1er run "No cursor yet" -> backfill 31 events; seed lance a cote ->
             "Indexed 5 event(s)" au tick suivant SANS re-telecharger les 31 (preuve du curseur).
-[ ] 9.6  Test e2e: rejouer une sequence d'events depuis zero -> etat DB deterministe
+[x] 9.6  Test e2e: rejouer une sequence d'events depuis zero -> etat DB deterministe
          (validation concrete de la reconstructibilite D9)
+         -> FAIT le 2026-06-26. Test #[sqlx::test] replay_is_deterministic_and_idempotent
+            (dans src/indexer/dispatch.rs): events SYNTHETIQUES (pas de RPC), rejoue
+            init -> 3 buys -> draw -> payout via dispatch_event sur une base ephemere.
+            Verifie l'etat exact (total_tickets=3, pot=0.3 SOL, winner_index=Some(1),
+            winner_address, state=Closed, claimed) PUIS rejoue la meme sequence et verifie
+            que RIEN ne change (3 tickets, 6 transactions) = preuve d'idempotence/D9. VERT.
+==> JALON: PHASE 9 (INDEXER) COMPLETE ET TESTEE. 9.7 (API REST lecture) repoussee.
 [ ] 9.7  (plus tard) API REST en LECTURE seule pour le frontend (historique/stats),
          reecrite proprement par-dessus models/repositories (l'ancien scaffold est supprime)
 
@@ -323,6 +330,18 @@ PHASE 9 — INDEXER : events on-chain -> cache DB (en RUST) (D9bis)
 --------------------------------------------------------------
 PHASE 10 — FRONTEND NEXT.JS
 --------------------------------------------------------------
+  Décisions verrouillées (2026-06-26):
+   - Stack: @solana/wallet-adapter (Phantom) + client Anchor classique (@coral-xyz/anchor 0.31.1).
+     Choix coherent avec l'on-chain et le mieux documente (cf CLAUDE.md, stack verrouille).
+   - SOURCE DES DONNEES (MVP): le front lit le round courant DIRECTEMENT on-chain via RPC
+     (source de verite). L'historique des rounds passes (10.8/10.9) et l'API REST lecture
+     seule (9.7) sont REPOUSSES A APRES LE MVP. >> Une fois le MVP front livre, on construira
+     l'API REST (9.7) en Rust par-dessus models/repositories, et le front basculera ses pages
+     historique/stats dessus (au lieu de scanner la chaine).
+   - Decouverte du round courant: par config/env (round_id connu) au MVP, pas de getProgramAccounts.
+   - METHODE DE BUILD: un front de reference (genere sur Lovable, rendu visuel cible) sert de
+     modele. On le RECONSTRUIT de zero a l'identique, pedagogiquement, pour apprendre React
+     (l'utilisateur retape tout a la main, doit savoir placer lui-meme un composant).
 [ ] 10.1  Init projet Next.js dans app/
 [ ] 10.2  Intégrer @solana/wallet-adapter (connexion Phantom)
 [ ] 10.3  Charger l'IDL + instancier le client Anchor
