@@ -339,19 +339,77 @@ PHASE 10 — FRONTEND NEXT.JS
      l'API REST (9.7) en Rust par-dessus models/repositories, et le front basculera ses pages
      historique/stats dessus (au lieu de scanner la chaine).
    - Decouverte du round courant: par config/env (round_id connu) au MVP, pas de getProgramAccounts.
-   - METHODE DE BUILD: un front de reference (genere sur Lovable, rendu visuel cible) sert de
-     modele. On le RECONSTRUIT de zero a l'identique, pedagogiquement, pour apprendre React
-     (l'utilisateur retape tout a la main, doit savoir placer lui-meme un composant).
-[ ] 10.1  Init projet Next.js dans app/
-[ ] 10.2  Intégrer @solana/wallet-adapter (connexion Phantom)
-[ ] 10.3  Charger l'IDL + instancier le client Anchor
-[ ] 10.4  Config RPC (env devnet, retries, rate-limit basique)
-[ ] 10.5  Page : afficher round courant (pot, end_timestamp, compteur)
-[ ] 10.6  Action : buy_ticket depuis le wallet connecté
-[ ] 10.7  Action : claim_prize pour le gagnant
-[ ] 10.8  API route Next.js -> lit la DB (historique), pas la chaîne directement
-[ ] 10.9  Page historique des rounds (depuis la DB)
-[ ] 10.10 Gestion des états UI (loading, erreurs tx, wallet non connecté)
+   - METHODE DE BUILD: un front de reference (genere sur Lovable) sert de MODELE VISUEL.
+     On le RECONSTRUIT de zero a l'identique, pedagogiquement. REVISION 2026-06-29: Claude
+     GENERE et ECRIT le code lui-meme (Write/Edit dans les fichiers), mais PAR PETITS MORCEAUX
+     et de maniere pedagogique (explication de chaque bloc avant/apres). L'utilisateur ne retape
+     plus a la main (faible valeur pedagogique pour du React/TS/CSS): il doit COMPRENDRE le code
+     genere et etre capable d'AJOUTER/MODIFIER des blocs lui-meme. SPECIFIQUE AU FRONT: pour
+     l'on-chain Rust, la regle "retape a la main" reste valable. Niveau: bases JS/web, NOUVEAU sur React.
+   - CARTOGRAPHIE app-reference/ (lecture seule, 2026-06-26): landing page mono-page 100% MOCKEE,
+     tout dans src/routes/index.tsx (9 sections React). Stack reference = TanStack Start (≠ cible)
+     + React 19 + Tailwind v4 (oklch) + shadcn/ui (new-york) + lucide + sonner + react-query.
+     Design system = src/styles.css (a PORTER): fonts Archivo Black + Inter; --primary violet
+     oklch(0.55 0.22 295), --accent teal; degrades --gradient-brand / --gradient-hero; utilitaires
+     .brand-text/.cta-glow/.card-soft/.float-y/.ticker-track. Assets PNG (theme en cours de
+     bascule "tresor" -> "candy": coton_candy/lolipop/orange_candy/solana/cloud...).
+   - VISUEL NON FIGE: la maquette evoluera encore (l'utilisateur la peaufine). => on construit
+     d'ABORD tout ce qui est INDEPENDANT du visuel (socle + web3), la reconstruction des sections
+     visuelles vient EN DERNIER, une fois app-reference fige.
+   - STRUCTURE NEXT.JS: App Router + src-dir (routes dans app/src/app/), alias @/* -> app/src/*.
+     REGLE CLE: tout composant qui touche wallet/tx/useState = Client Component ("use client").
+     Providers wallet dans le layout; lectures on-chain via react-query; ecritures au clic.
+
+  >>> DECOUPAGE EN SOUS-PHASES (ordre d'execution) <<<
+
+  -- 10.A  SOCLE NEXT.JS (independant du visuel -- A FAIRE MAINTENANT) --
+[ ] 10.1  Scaffold create-next-app dans app/ (App Router, TS, Tailwind v4, ESLint, src-dir,
+          alias @/*). Verifier `npm run dev` -> page par defaut, puis nettoyer le boilerplate.
+[ ] 10.2  Porter le design system: globals.css (tokens oklch :root + utilitaires .brand-text/
+          .cta-glow/.card-soft/.float-y/.ticker-track), fonts Archivo Black + Inter via next/font.
+          Verifier que le theme s'applique sur une page nue.
+[ ] 10.3  Fondamentaux React: lib/utils.ts (helper cn), init shadcn/ui (button + card),
+          1er composant affiche. Apprentissage: composant / props / JSX / className.
+
+  -- 10.B  PROVIDERS & CLIENT ANCHOR (plomberie web3 -- independant du visuel) --
+[ ] 10.4  lib/constants.ts: PROGRAM_ID, RPC devnet, round_id courant via env NEXT_PUBLIC_*.
+[ ] 10.5  providers.tsx ("use client"): ConnectionProvider + WalletProvider + WalletModalProvider
+          (Phantom/devnet), cable dans layout.tsx.
+[ ] 10.6  Bouton "Connect wallet" (hook useWallet): connexion + adresse tronquee + disconnect.
+          1er vrai usage d'un hook Solana.
+[ ] 10.7  lib/anchor.ts: copier l'IDL target/idl/lottery.json dans le front, construire l'objet
+          Program (VERIFIER la signature @coral-xyz/anchor 0.31.1), exposer via un hook useProgram.
+
+  -- 10.C  LECTURES ON-CHAIN --
+[ ] 10.8  Derivation des PDA cote front (lottery, vault) avec les MEMES seeds que le programme.
+[ ] 10.9  Lire le compte Lottery courant (account.lottery.fetch) -> pot, total_tickets, state,
+          end_timestamp, winner_index. Encapsule dans react-query (cache + refetch).
+[ ] 10.10 Compte a rebours depuis end_timestamp + (si besoin) solde du vault pour le pot affiche.
+
+  -- 10.D  ECRITURES (transactions signees) --
+[ ] 10.11 buy_ticket: methods.buyTicket()...rpc(), signature wallet, refetch apres confirmation.
+[ ] 10.12 payout (claim): pour le gagnant; resoudre winner_index -> ticket -> buyer; garde-fous
+          UI (visible seulement si gagnant ET state=Closed ET !claimed).
+[ ] 10.13 (admin, optionnel) initialize_lottery + draw_winner par l'authority = outil interne,
+          PAS expose au public (cf CLAUDE.md: draw reserve a l'authority).
+
+  -- 10.E  RECONSTRUCTION VISUELLE (APRES que app-reference soit FIGE) --
+[ ] 10.14 Importer les assets figes (theme final) dans app/public (ou src/assets).
+[ ] 10.15 Reconstruire section par section en composants, MOCKS d'abord (Header, Hero,
+          round unique, HowItWorks, Trust, Stats, FinalCTA, Footer). Claude ecrit par morceaux,
+          l'utilisateur comprend et adapte (cf revision methode de build 2026-06-29).
+[ ] 10.16 CORRIGER LE CONTENU vers la verite (badge devnet, retirer "mainnet"/"VRF",
+          UN seul round). Obligatoire cf CLAUDE.md (ne pas vendre l'alea simple comme sur).
+[ ] 10.17 Brancher les sections sur les vraies donnees (remplacer les mocks par 10.C + 10.D).
+
+  -- 10.F  ETATS UI & ROBUSTESSE --
+[ ] 10.18 Etats UI: wallet deconnecte, tx pending (spinner), toasts succes/erreur (sonner),
+          round closed/drawing, "tu as gagne -> claim", aucun round actif (empty state).
+[ ] 10.19 Config RPC: gestion erreurs/retries basique, commitment 'confirmed', garde rate-limit.
+
+  -- 10.G  HISTORIQUE (REPOUSSE APRES LE MVP -- depend de l'API REST 9.7) --
+[ ] 10.20 (apres 9.7) Lire l'historique depuis l'API REST Rust (PAS la chaine directement).
+[ ] 10.21 (apres 9.7) Page historique des rounds + stats depuis la DB.
 
 
 --------------------------------------------------------------

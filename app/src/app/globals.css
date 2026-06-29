@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+/* Block 1 — map design tokens to Tailwind utilities (e.g. --color-primary -> 
+bg-primary). */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+
+  --font-sans: var(--font-inter);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Block 2 — the actual values. All colors in oklch, light theme only. */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.99 0.005 90);
+  --foreground: oklch(0.18 0.02 280);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.02 280);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.02 280);
+  --primary: oklch(0.55 0.22 295);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.97 0.008 280);
+  --secondary-foreground: oklch(0.2 0.02 280);
+  --muted: oklch(0.97 0.008 280);
+  --muted-foreground: oklch(0.5 0.02 280);
+  --accent: oklch(0.78 0.17 165);
+  --accent-foreground: oklch(0.99 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.93 0.01 280);
+  --input: oklch(0.93 0.01 280);
+  --ring: oklch(0.55 0.22 295);
+  --success: oklch(0.72 0.18 160);
+  --success-foreground: oklch(0.99 0 0);
+
+  /* Display font wired from next/font (see layout.tsx). Kept out of @theme on
+      purpose so it doesn't generate a conflicting `font-display` utility. */
+  --font-display: var(--font-archivo-black);
+
+  --gradient-hero: radial-gradient(ellipse at 50% 0%, oklch(0.96 0.04 295) 0%,
+oklch(0.99 0.01 280) 60%, oklch(1 0 0) 100%);
+  --gradient-brand: linear-gradient(135deg, oklch(0.55 0.22 295) 0%, oklch(0.72 0.18
+165) 100%);
+  --shadow-cta: 0 14px 32px -10px oklch(0.55 0.22 295 / 0.45);
+  --shadow-card: 0 1px 0 oklch(1 0 0 / 0.6) inset, 0 1px 3px oklch(0.2 0.02 280 /
+0.05), 0 12px 28px -12px oklch(0.2 0.02 280 / 0.12);
+}
+
+/* Block 3 — base styles: default border color, body font, the .font-display class. 
+*/
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+  }
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Block 4 — custom utilities used by the landing (gradient text, glows, floats). */
+@layer utilities {
+  .brand-text {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .cta-glow {
+    box-shadow: var(--shadow-cta), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+  .card-soft {
+    box-shadow: var(--shadow-card);
+  }
+  .float-y { animation: floaty 6s ease-in-out infinite; }
+  .float-slow { animation: floaty 7s ease-in-out infinite; }
+  .float-med { animation: floaty 5s ease-in-out infinite; }
+  .float-fast { animation: floaty 4s ease-in-out infinite; }
+  @keyframes floaty {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-18px); }
+  }
+  .ticker-track { animation: ticker 60s linear infinite; }
+  @keyframes ticker {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+}
