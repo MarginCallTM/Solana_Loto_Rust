@@ -390,8 +390,12 @@ PHASE 10 — FRONTEND NEXT.JS
           -> FAIT (2026-07-01): app/src/app/globals.css = design system candy fusionne, recolorie
              en BLEU (cf REVISION 2026-07-01). Inter cablee dans layout.tsx (--font-inter). Verifie
              sur page.tsx de smoke-test: --primary=#3981f6, gradient-brand bleu, utilitaires OK.
-[ ] 10.3  Fondamentaux React: lib/utils.ts (helper cn), init shadcn/ui (button + card),
+[x] 10.3  Fondamentaux React: lib/utils.ts (helper cn), init shadcn/ui (button + card),
           1er composant affiche. Apprentissage: composant / props / JSX / className.
+          -> FAIT (2026-07-01): lib/utils.ts (cn), components.json (new-york, rsc:true,
+             css=src/app/globals.css), button.tsx + card.tsx REPRIS de app-reference (pixel-perfect).
+             Deps: clsx tailwind-merge class-variance-authority @radix-ui/react-slot lucide-react.
+             Rendu OK sur page.tsx (variantes Button + Card, couleur bleue appliquee).
 
   -- 10.B  PROVIDERS & CLIENT ANCHOR (plomberie web3 -- independant du visuel) --
 [ ] 10.4  lib/constants.ts: PROGRAM_ID, RPC devnet, round_id courant via env NEXT_PUBLIC_*.
