@@ -359,15 +359,37 @@ PHASE 10 — FRONTEND NEXT.JS
    - STRUCTURE NEXT.JS: App Router + src-dir (routes dans app/src/app/), alias @/* -> app/src/*.
      REGLE CLE: tout composant qui touche wallet/tx/useState = Client Component ("use client").
      Providers wallet dans le layout; lectures on-chain via react-query; ecritures au clic.
+   - REVISION 2026-07-01 (reprise phase 10):
+     * SOCLE TRANCHE: on RECONSTRUIT en Next.js (choix confirme vs garder l'export Lovable).
+       Une export Lovable (TanStack Start + Vite + bun) avait ete deposee dans app/; elle a ete
+       DEPLACEE vers app-reference/ (commit b79d28d) comme MODELE VISUEL en LECTURE SEULE, et app/
+       a ete VIDE puis re-scaffolde en Next.js 16 propre. Ce repo n'est PAS connecte a Lovable.
+     * PACKAGE MANAGER du front = npm (choix utilisateur; bun non installe). next.config.ts:
+       turbopack.root = __dirname (evite le conflit avec le yarn.lock racine du workspace Anchor).
+     * NOUVELLE PALETTE = BLEU (plus violet). Source: ~/Documents/Solana_front_react/globals.css
+       (--primary oklch(0.62 0.19 259.81) = #3981f6). METHODE DE FUSION validee: on GARDE le
+       design system candy de app-reference/src/styles.css (structure, utilitaires .brand-text/
+       .cta-glow/.card-soft/.float-y/.ticker-track, animations chest/floaty/marquee), et on
+       REMPLACE uniquement (a) les VALEURS de couleur -> palette bleue, (b) les POLICES -> Inter
+       partout (font-display = Inter, PLUS d'Archivo Black), (c) les 4 degrades de marque
+       (--gradient-brand, --gradient-hero, --shadow-cta, .jackpot-text) recoloris violet->bleu.
+       success reste VERT (semantique). radius garde a 0.625rem (candy arrondi).
+     * EXIGENCE: rebuild PIXEL-PERFECT du LAYOUT candy de Lovable, recolorie en bleu.
 
   >>> DECOUPAGE EN SOUS-PHASES (ordre d'execution) <<<
 
   -- 10.A  SOCLE NEXT.JS (independant du visuel -- A FAIRE MAINTENANT) --
-[ ] 10.1  Scaffold create-next-app dans app/ (App Router, TS, Tailwind v4, ESLint, src-dir,
+[x] 10.1  Scaffold create-next-app dans app/ (App Router, TS, Tailwind v4, ESLint, src-dir,
           alias @/*). Verifier `npm run dev` -> page par defaut, puis nettoyer le boilerplate.
-[ ] 10.2  Porter le design system: globals.css (tokens oklch :root + utilitaires .brand-text/
-          .cta-glow/.card-soft/.float-y/.ticker-track), fonts Archivo Black + Inter via next/font.
+          -> FAIT (2026-07-01): Next.js 16.2.9 / React 19.2 / Tailwind v4, npm. Boot OK (HTTP 200,
+             Ready ~310ms). Fix turbopack.root dans next.config.ts. Boilerplate page.tsx nettoye.
+             NB: ne lancer QU'UN SEUL `npm run dev` (instances empilees = OOM heap).
+[x] 10.2  Porter le design system: globals.css (tokens oklch :root + utilitaires .brand-text/
+          .cta-glow/.card-soft/.float-y/.ticker-track), font Inter via next/font.
           Verifier que le theme s'applique sur une page nue.
+          -> FAIT (2026-07-01): app/src/app/globals.css = design system candy fusionne, recolorie
+             en BLEU (cf REVISION 2026-07-01). Inter cablee dans layout.tsx (--font-inter). Verifie
+             sur page.tsx de smoke-test: --primary=#3981f6, gradient-brand bleu, utilitaires OK.
 [ ] 10.3  Fondamentaux React: lib/utils.ts (helper cn), init shadcn/ui (button + card),
           1er composant affiche. Apprentissage: composant / props / JSX / className.
 
