@@ -421,9 +421,15 @@ PHASE 10 — FRONTEND NEXT.JS
 
   -- 10.E  RECONSTRUCTION VISUELLE (APRES que app-reference soit FIGE) --
 [ ] 10.14 Importer les assets figes (theme final) dans app/public (ou src/assets).
-[ ] 10.15 Reconstruire section par section en composants, MOCKS d'abord (Header, Hero,
+[~] 10.15 Reconstruire section par section en composants, MOCKS d'abord (Header, Hero,
           round unique, HowItWorks, Trust, Stats, FinalCTA, Footer). Claude ecrit par morceaux,
           l'utilisateur comprend et adapte (cf revision methode de build 2026-06-29).
+          -> EN COURS (2026-07-01): FAITS = Ticker, Header, Hero (bloc principal + marquee
+             "Powered by" 6 logos). Composants dans app/src/components/site/. Assets Hero copies
+             depuis ~/Documents/Solana_front_react/Asset_img (+ /logo banner) vers app/public/
+             (cloud-cute, candy=orange_candy_done, chest-wallpaper, solana, phantom, backpack,
+             jupiter, superteam, solflare). Images en <img> plain (fidelite). animate-fade-in
+             ajoute au globals.css. RESTE: Lotteries, HowItWorks, Trust, Stats, FinalCTA, Footer.
 [ ] 10.16 CORRIGER LE CONTENU vers la verite (badge devnet, retirer "mainnet"/"VRF",
           UN seul round). Obligatoire cf CLAUDE.md (ne pas vendre l'alea simple comme sur).
 [ ] 10.17 Brancher les sections sur les vraies donnees (remplacer les mocks par 10.C + 10.D).
